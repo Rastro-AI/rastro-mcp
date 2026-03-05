@@ -84,3 +84,11 @@ Use a workspace `.mcp.json` entry like:
 ## License
 
 MIT
+
+## PyPI Publish Notes
+
+- GitHub Actions workflow: `.github/workflows/publish.yml`
+- Trusted publisher values on PyPI must match:
+  - Owner: `Rastro-AI`
+  - Repository: `rastro-mcp`
+  - Workflow: `publish.yml`

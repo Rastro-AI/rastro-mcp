@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "rastro": {
+      "command": "bash",
+      "args": [
+        "-lc",
+        "cd /ABSOLUTE/PATH/rastro-mcp && export RASTRO_API_KEY='rastro_pk_...' && export RASTRO_BASE_URL='https://catalogapi.rastro.ai/api' && uv run rastro-mcp"
+      ]
+    }
+  }
+}

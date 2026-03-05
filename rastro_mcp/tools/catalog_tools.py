@@ -1,0 +1,501 @@
+"""
+catalog_* MCP tools - Rastro catalog read/write operations.
+
+Tools:
+- catalog_list
+- catalog_get
+- catalog_delete
+- catalog_schema_get
+- catalog_taxonomy_get
+- catalog_items_query
+- catalog_item_get
+- catalog_item_update
+- catalog_activity_list
+- catalog_activity_get
+- catalog_activity_get_staged_changes
+- catalog_activity_audit
+- catalog_activity_clear
+- catalog_activity_create_transform
+- catalog_snapshot_list
+- catalog_snapshot_create
+- catalog_snapshot_restore
+- catalog_duplicate
+- catalog_activity_save_workflow
+"""
+
+import asyncio
+import json
+import os
+import webbrowser
+from collections import Counter
+from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
+
+from rastro_mcp.client.api_client import RastroClient
+from rastro_mcp.execution.bundle_validate import bundle_validate
+from rastro_mcp.execution.path_safety import UnsafePathError, resolve_workspace_path
+from rastro_mcp.models.contracts import (
+    BundleValidateInput,
+    CatalogActivityAuditInput,
+    CatalogActivityClearInput,
+    CatalogActivityCreateTransformInput,
+    CatalogActivityGetInput,
+    CatalogActivitySaveWorkflowInput,
+    CatalogActivityGetStagedChangesInput,
+    CatalogActivityListInput,
+    CatalogDuplicateInput,
+    CatalogDeleteInput,
+    CatalogGetInput,
+    CatalogItemGetInput,
+    CatalogItemsQueryInput,
+    CatalogItemUpdateInput,
+    CatalogListInput,
+    CatalogSchemaGetInput,
+    CatalogSnapshotCreateInput,
+    CatalogSnapshotListInput,
+    CatalogSnapshotRestoreInput,
+    CatalogTaxonomyGetInput,
+    CreateTransformOutput,
+    ValidationRules,
+)
+
+def _should_open_review_url(url: str) -> bool:
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return False
+    host = parsed.netloc.lower()
+    scheme = parsed.scheme.lower()
+    if host == "dashboard.rastro.ai":
+        return scheme == "https"
+    if host in {"localhost:3000", "127.0.0.1:3000"}:
+        return scheme in {"http", "https"}
+    return False
+
+
+async def catalog_list(client: RastroClient, params: CatalogListInput) -> dict:
+    """List all catalogs for the authenticated organization."""
+    return await client.list_catalogs(limit=params.limit, offset=params.offset)
+
+
+async def catalog_get(client: RastroClient, params: CatalogGetInput) -> dict:
+    """Get a single catalog by ID."""
+    return await client.get_catalog(params.catalog_id)
+
+
+async def catalog_delete(client: RastroClient, params: CatalogDeleteInput) -> dict:
+    """Delete a catalog after explicit confirmation."""
+    catalog = await client.get_catalog(params.catalog_id)
+    catalog_name = catalog.get("name")
+
+    if params.expected_name and catalog_name != params.expected_name:
+        raise ValueError(f"Catalog name mismatch. Expected '{params.expected_name}', got '{catalog_name}'. Refusing delete.")
+
+    expected_phrase = f"DELETE {params.catalog_id}"
+    if not params.confirm:
+        return {
+            "deleted": False,
+            "requires_confirmation": True,
+            "catalog_id": params.catalog_id,
+            "catalog_name": catalog_name,
+            "expected_confirmation": expected_phrase,
+            "message": "Destructive operation blocked. Re-run with confirm=true and the exact confirmation phrase.",
+        }
+    if params.confirmation != expected_phrase:
+        raise ValueError(f"Invalid confirmation phrase. Expected exactly: '{expected_phrase}'")
+
+    await client.delete_catalog(params.catalog_id)
+    return {
+        "deleted": True,
+        "catalog_id": params.catalog_id,
+        "catalog_name": catalog_name,
+        "message": "Catalog deleted successfully.",
+    }
+
+
+async def catalog_schema_get(client: RastroClient, params: CatalogSchemaGetInput) -> dict:
+    """Get catalog schema definition with field metadata."""
+    return await client.get_catalog_schema(params.catalog_id, version=params.version)
+
+
+async def catalog_taxonomy_get(client: RastroClient, params: CatalogTaxonomyGetInput) -> dict:
+    """Get catalog taxonomy with computed inheritance."""
+    return await client.get_catalog_taxonomy(params.catalog_id)
+
+
+async def catalog_items_query(client: RastroClient, params: CatalogItemsQueryInput) -> dict:
+    """Query catalog items with pagination, search, and sorting."""
+    return await client.get_catalog_items(
+        catalog_id=params.catalog_id,
+        limit=params.limit,
+        offset=params.offset,
+        search=params.search,
+        sort_field=params.sort_field,
+        sort_order=params.sort_order,
+    )
+
+
+async def catalog_item_get(client: RastroClient, params: CatalogItemGetInput) -> dict:
+    """Get a single catalog item by ID."""
+    return await client.get_catalog_item(params.catalog_id, params.item_id)
+
+
+async def catalog_item_update(client: RastroClient, params: CatalogItemUpdateInput) -> dict:
+    """Update a single catalog item's data directly.
+
+    Disabled by default because backend PUT replaces full item data and can
+    accidentally drop fields. Use staged custom-transform activities instead.
+    """
+    direct_update_enabled = os.environ.get("RASTRO_MCP_ENABLE_DIRECT_ITEM_UPDATE", "").lower() in {"1", "true", "yes", "on"}
+    if not direct_update_enabled:
+        raise ValueError(
+            "catalog_item_update is disabled by default for safety. "
+            "Use catalog_activity_create_transform (activity-first) for edits. "
+            "Set RASTRO_MCP_ENABLE_DIRECT_ITEM_UPDATE=true only for explicit break-glass runs."
+        )
+    return await client.update_catalog_item(params.catalog_id, params.item_id, params.data)
+
+
+async def catalog_activity_list(client: RastroClient, params: CatalogActivityListInput) -> dict:
+    """List activities for a catalog."""
+    return await client.list_activities(
+        catalog_id=params.catalog_id,
+        status=params.status,
+        activity_type=params.activity_type,
+        limit=params.limit,
+        offset=params.offset,
+    )
+
+
+async def catalog_activity_get(client: RastroClient, params: CatalogActivityGetInput) -> dict:
+    """Get a single activity by ID."""
+    return await client.get_activity(params.activity_id)
+
+
+async def catalog_activity_get_staged_changes(client: RastroClient, params: CatalogActivityGetStagedChangesInput) -> dict:
+    """Get staged changes for a pending activity."""
+    return await client.get_staged_changes(params.activity_id, limit=params.limit, offset=params.offset)
+
+
+async def catalog_activity_audit(client: RastroClient, params: CatalogActivityAuditInput) -> dict:
+    """Audit catalog activities with optional staged-change summaries."""
+    listing = await client.list_activities(
+        catalog_id=params.catalog_id,
+        status=params.status,
+        activity_type=params.activity_type,
+        limit=params.limit,
+        offset=params.offset,
+    )
+    activities = listing.get("activities", []) or []
+    status_counts = Counter(str(activity.get("status", "unknown")) for activity in activities)
+    type_counts = Counter(str(activity.get("type", "unknown")) for activity in activities)
+
+    if not params.include_staged_summary:
+        return {
+            "catalog_id": params.catalog_id,
+            "total": listing.get("total", len(activities)),
+            "status_counts": dict(status_counts),
+            "type_counts": dict(type_counts),
+            "activities": activities,
+        }
+
+    semaphore = asyncio.Semaphore(8)
+
+    async def _attach_summary(activity: Dict[str, Any]) -> Dict[str, Any]:
+        activity_id = activity.get("id")
+        if not activity_id:
+            enriched = dict(activity)
+            enriched["staged_summary"] = {"error": "missing_activity_id"}
+            return enriched
+
+        try:
+            async with semaphore:
+                summary = await client.get_activity_staged_changes_summary(activity_id)
+        except Exception as exc:
+            enriched = dict(activity)
+            enriched["staged_summary"] = {"error": str(exc)}
+            return enriched
+
+        enriched = dict(activity)
+        enriched["staged_summary"] = summary
+        return enriched
+
+    enriched_activities = await asyncio.gather(*(_attach_summary(activity) for activity in activities))
+    return {
+        "catalog_id": params.catalog_id,
+        "total": listing.get("total", len(enriched_activities)),
+        "status_counts": dict(status_counts),
+        "type_counts": dict(type_counts),
+        "activities": enriched_activities,
+    }
+
+
+async def catalog_activity_clear(client: RastroClient, params: CatalogActivityClearInput) -> dict:
+    """Clear stale activities by rejecting staged changes and optionally cancelling activities."""
+    if params.activity_ids:
+        candidate_ids = list(dict.fromkeys(params.activity_ids))
+    else:
+        listing = await client.list_activities(
+            catalog_id=params.catalog_id,
+            status=params.status,
+            activity_type=params.activity_type,
+            limit=params.limit,
+            offset=params.offset,
+        )
+        candidate_ids = [activity.get("id") for activity in (listing.get("activities", []) or []) if activity.get("id")]
+
+    results: List[Dict[str, Any]] = []
+    for activity_id in candidate_ids:
+        result: Dict[str, Any] = {"activity_id": activity_id}
+
+        try:
+            activity = await client.get_activity(activity_id)
+        except Exception as exc:
+            result["error"] = f"failed_to_fetch_activity: {exc}"
+            results.append(result)
+            continue
+
+        if str(activity.get("catalog_id")) != params.catalog_id:
+            result["error"] = "catalog_mismatch"
+            result["catalog_id"] = activity.get("catalog_id")
+            results.append(result)
+            continue
+
+        if params.reject_staged_changes:
+            try:
+                result["bulk_review"] = await client.bulk_review_activity_staged_changes(
+                    activity_id=activity_id,
+                    action="reject_all",
+                    rejection_reason=params.rejection_reason,
+                )
+            except Exception as exc:
+                result["bulk_review_error"] = str(exc)
+
+        if params.cancel_activity:
+            try:
+                result["cancel"] = await client.cancel_activity(activity_id)
+            except Exception as exc:
+                result["cancel_error"] = str(exc)
+
+        results.append(result)
+
+    success_count = sum(1 for entry in results if "error" not in entry and "bulk_review_error" not in entry and "cancel_error" not in entry)
+    return {
+        "catalog_id": params.catalog_id,
+        "selected_activity_count": len(candidate_ids),
+        "success_count": success_count,
+        "results": results,
+    }
+
+
+async def catalog_snapshot_list(client: RastroClient, params: CatalogSnapshotListInput) -> dict:
+    """List catalog snapshots for rollback/history."""
+    return await client.list_catalog_snapshots(
+        catalog_id=params.catalog_id,
+        snapshot_type=params.snapshot_type,
+        limit=params.limit,
+        offset=params.offset,
+    )
+
+
+async def catalog_snapshot_create(client: RastroClient, params: CatalogSnapshotCreateInput) -> dict:
+    """Create a manual snapshot for rollback safety."""
+    return await client.create_catalog_snapshot(params.catalog_id, params.reason)
+
+
+async def catalog_snapshot_restore(client: RastroClient, params: CatalogSnapshotRestoreInput) -> dict:
+    """Restore catalog to a previous snapshot."""
+    return await client.restore_catalog_snapshot(params.catalog_id, params.snapshot_id)
+
+
+async def catalog_duplicate(client: RastroClient, params: CatalogDuplicateInput) -> dict:
+    """Duplicate a catalog schema and optionally copy items."""
+    payload: Dict[str, Any] = {
+        "include_items": params.include_items,
+    }
+    if params.name:
+        payload["name"] = params.name
+    if params.description is not None:
+        payload["description"] = params.description
+    return await client.duplicate_catalog(params.catalog_id, payload)
+
+
+async def catalog_activity_save_workflow(client: RastroClient, params: CatalogActivitySaveWorkflowInput) -> dict:
+    """Save an activity as a reusable workflow template."""
+    payload: Dict[str, Any] = {
+        "workflow_name": params.workflow_name,
+        "timeout_seconds": params.timeout_seconds,
+    }
+    if params.workflow_description is not None:
+        payload["workflow_description"] = params.workflow_description
+    if params.python_code is not None:
+        payload["python_code"] = params.python_code
+    if params.attachments is not None:
+        payload["attachments"] = params.attachments
+    return await client.save_activity_as_workflow(params.catalog_id, params.activity_id, payload)
+
+
+async def catalog_activity_create_transform(client: RastroClient, params: CatalogActivityCreateTransformInput) -> CreateTransformOutput:
+    """Create a custom transform activity with staged changes and audit metadata.
+
+    1. Loads staged changes from file or inline.
+    2. Runs bundle validation.
+    3. Creates the activity via the backend API.
+    4. Optionally opens the review URL in a browser.
+    """
+    # Load staged changes
+    staged_changes: List[Dict[str, Any]] = []
+    if params.staged_changes_file_path:
+        try:
+            path = resolve_workspace_path(
+                params.staged_changes_file_path,
+                must_exist=True,
+                expect_file=True,
+                label="staged_changes_file_path",
+            )
+        except UnsafePathError as exc:
+            raise ValueError(str(exc)) from exc
+        if path.endswith(".jsonl"):
+            with open(path) as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        staged_changes.append(json.loads(line))
+        elif path.endswith(".json"):
+            with open(path) as f:
+                data = json.load(f)
+            staged_changes = data if isinstance(data, list) else [data]
+        elif path.endswith(".parquet"):
+            import pandas as pd
+            df = pd.read_parquet(path)
+            staged_changes = df.to_dict("records")
+    elif params.staged_changes_inline:
+        staged_changes = params.staged_changes_inline
+
+    # Run bundle validation
+    validate_input = BundleValidateInput(
+        catalog_id=params.catalog_id,
+        staged_changes_path=params.staged_changes_file_path,
+        diff_summary=params.diff_summary,
+        schema_changes=params.schema_changes,
+        taxonomy_changes=params.taxonomy_changes,
+        rules=ValidationRules(),
+    )
+    validation = await bundle_validate(client, validate_input)
+
+    if not validation.valid:
+        error_msgs = "; ".join(e.message for e in validation.errors)
+        raise ValueError(f"Bundle validation failed: {error_msgs}")
+
+    # Build metadata/context payload used for the activity shell.
+    activity_metadata: Dict[str, Any] = {
+        "source": "mcp_custom_transform",
+    }
+    if params.script:
+        activity_metadata["script"] = params.script.model_dump()
+    if params.diff_summary:
+        activity_metadata["diff_summary"] = params.diff_summary
+    if validation.computed:
+        activity_metadata["validation_report"] = {
+            "valid": validation.valid,
+            "errors": [e.model_dump() for e in validation.errors],
+            "warnings": [w.model_dump() for w in validation.warnings],
+            "computed": validation.computed,
+        }
+    if params.base_snapshot_id:
+        activity_metadata["base_snapshot_id"] = params.base_snapshot_id
+
+    # Store schema/taxonomy changes in input for apply-time hooks.
+    input_data: Dict[str, Any] = {"description": params.activity_message}
+    if params.schema_changes:
+        input_data["schema_changes"] = params.schema_changes
+    if params.taxonomy_changes:
+        input_data["taxonomy_changes"] = params.taxonomy_changes
+
+    activity_context: Dict[str, Any] = {}
+    if params.activity_context:
+        activity_context.update(params.activity_context)
+    if params.attachments is not None:
+        activity_context["attachments"] = params.attachments
+    if params.session_context:
+        activity_context["session_context"] = params.session_context
+    if activity_context:
+        input_data["activity_context"] = activity_context
+
+    # Create a single activity shell first, then append staged changes in chunks.
+    create_payload: Dict[str, Any] = {
+        "type": "custom_transform",
+        "description": params.activity_message,
+        "metadata": activity_metadata,
+        "status": "created",
+        "staged_changes": [],
+    }
+    created = await client.create_activity(params.catalog_id, create_payload)
+    activity_id = created["activity_id"]
+
+    # Chunk append to avoid large request-body failures while keeping one activity.
+    stage_batch_size = int(os.environ.get("RASTRO_MCP_STAGE_BATCH_SIZE", "2000"))
+    if stage_batch_size <= 0:
+        stage_batch_size = 2000
+    stage_retries = int(os.environ.get("RASTRO_MCP_STAGE_RETRIES", "3"))
+    if stage_retries <= 0:
+        stage_retries = 3
+
+    async def _append_chunk_with_retry(chunk: List[Dict[str, Any]]) -> Dict[str, Any]:
+        last_error: Optional[Exception] = None
+        for attempt in range(stage_retries):
+            try:
+                return await client.append_activity_staged_changes(activity_id, chunk)
+            except Exception as exc:
+                last_error = exc
+                if attempt == stage_retries - 1:
+                    raise
+                await asyncio.sleep(min(0.4 * (2**attempt), 2.0))
+        if last_error:
+            raise last_error
+        raise RuntimeError("Failed to append staged changes")
+
+    appended_total = 0
+    if staged_changes:
+        for i in range(0, len(staged_changes), stage_batch_size):
+            chunk = staged_changes[i : i + stage_batch_size]
+            append_result = await _append_chunk_with_retry(chunk)
+            appended_total = max(appended_total, int(append_result.get("total_staged_changes", appended_total + len(chunk))))
+
+    # Finalize to pending review and fetch canonical review URL.
+    finalized: Optional[Dict[str, Any]] = None
+    last_finalize_error: Optional[Exception] = None
+    for attempt in range(stage_retries):
+        try:
+            finalized = await client.set_activity_pending_review(
+                activity_id,
+                message=params.activity_message,
+                output=params.diff_summary,
+            )
+            break
+        except Exception as exc:
+            last_finalize_error = exc
+            if attempt == stage_retries - 1:
+                raise
+            await asyncio.sleep(min(0.4 * (2**attempt), 2.0))
+
+    if finalized is None:
+        if last_finalize_error:
+            raise last_finalize_error
+        raise RuntimeError("Failed to finalize activity for review")
+
+    output = CreateTransformOutput(
+        activity_id=finalized["activity_id"],
+        status=finalized["status"],
+        staged_count=finalized.get("staged_count", appended_total),
+        review_url=finalized["review_url"],
+    )
+
+    # Always attempt to open the review URL for user validation.
+    try:
+        if _should_open_review_url(output.review_url):
+            webbrowser.open(output.review_url)
+    except Exception:
+        pass  # Non-critical
+
+    return output

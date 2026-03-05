@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v3
+      - name: Setup Python
+        run: uv python install 3.11
+      - name: Sync deps
+        run: uv sync
+      - name: Compile check
+        run: uv run python -m compileall rastro_mcp
+      - name: Build package
+        run: uv build

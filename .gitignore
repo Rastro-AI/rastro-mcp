@@ -7,3 +7,5 @@ __pycache__/
 .env
 build/
 dist/
+uv.lock
+work/

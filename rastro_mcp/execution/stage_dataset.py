@@ -42,8 +42,6 @@ async def stage_dataset(client: RastroClient, params: StageDatasetInput) -> Stag
             before_path=params.before_path,
             after_path=params.after_path,
             key_field=params.key_field,
-            deterministic_key_fields=params.deterministic_key_fields,
-            allow_row_index_fallback=params.allow_row_index_fallback,
         )
     )
 
@@ -73,10 +71,6 @@ async def stage_dataset(client: RastroClient, params: StageDatasetInput) -> Stag
         staged_count=staged.staged_count,
         review_url=staged.review_url,
         staged_changes_path=diff_result.staged_changes_path,
-        diff_details_path=diff_result.diff_details_path,
         diff_summary=diff_result.diff_summary,
         sample_changes=diff_result.sample_changes,
-        field_change_counts=diff_result.field_change_counts,
-        entity_type_change_counts=diff_result.entity_type_change_counts,
-        key_diagnostics=diff_result.key_diagnostics,
     )

@@ -23,8 +23,6 @@ from rastro_mcp.client.api_client import RastroClient
 from rastro_mcp.client.auth import RastroAuth, load_auth_from_env
 from rastro_mcp.models.contracts import (
     BundleValidateInput,
-    CatalogActivityAuditInput,
-    CatalogActivityClearInput,
     CatalogActivityCreateTransformInput,
     CatalogActivityGetInput,
     CatalogActivitySaveWorkflowInput,
@@ -52,8 +50,6 @@ from rastro_mcp.models.contracts import (
 )
 from rastro_mcp.tools.catalog_tools import (
     catalog_activity_create_transform,
-    catalog_activity_audit,
-    catalog_activity_clear,
     catalog_activity_get,
     catalog_activity_save_workflow,
     catalog_activity_get_staged_changes,
@@ -234,41 +230,6 @@ TOOL_DEFINITIONS = [
                 "offset": {"type": "integer", "default": 0, "description": "Offset for pagination"},
             },
             "required": ["activity_id"],
-        },
-    },
-    {
-        "name": "catalog_activity_audit",
-        "description": "Audit activities for a catalog with status/type counts and optional staged-change summaries.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "catalog_id": {"type": "string", "description": "Catalog UUID"},
-                "status": {"type": "string", "description": "Optional activity status filter"},
-                "activity_type": {"type": "string", "description": "Optional activity type filter"},
-                "limit": {"type": "integer", "default": 50},
-                "offset": {"type": "integer", "default": 0},
-                "include_staged_summary": {"type": "boolean", "default": True},
-            },
-            "required": ["catalog_id"],
-        },
-    },
-    {
-        "name": "catalog_activity_clear",
-        "description": "Clear stale activities by rejecting staged changes and optionally cancelling activities.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "catalog_id": {"type": "string", "description": "Catalog UUID"},
-                "activity_ids": {"type": "array", "items": {"type": "string"}, "description": "Specific activity IDs to clear"},
-                "status": {"type": "string", "default": "pending_review", "description": "Status filter when activity_ids is omitted"},
-                "activity_type": {"type": "string", "description": "Type filter when activity_ids is omitted"},
-                "limit": {"type": "integer", "default": 100},
-                "offset": {"type": "integer", "default": 0},
-                "rejection_reason": {"type": "string", "default": "Superseded by a newer staged update"},
-                "reject_staged_changes": {"type": "boolean", "default": True},
-                "cancel_activity": {"type": "boolean", "default": True},
-            },
-            "required": ["catalog_id"],
         },
     },
     {
@@ -463,8 +424,6 @@ TOOL_DEFINITIONS = [
                 "after_path": {"type": "string", "description": "Path to after dataset (parquet/csv)"},
                 "activity_message": {"type": "string", "description": "Human-readable review message"},
                 "key_field": {"type": "string", "default": "__catalog_item_id"},
-                "deterministic_key_fields": {"type": "array", "items": {"type": "string"}, "description": "Optional fallback identity fields for deterministic row matching"},
-                "allow_row_index_fallback": {"type": "boolean", "default": True, "description": "Use stable row index as final deterministic fallback when key fields are missing"},
                 "script_path": {"type": "string", "description": "Optional Python script path for audit provenance"},
                 "schema_changes": {"type": "object"},
                 "taxonomy_changes": {"type": "object"},
@@ -484,8 +443,6 @@ TOOL_DEFINITIONS = [
                 "before_path": {"type": "string", "description": "Path to before dataset (parquet/csv)"},
                 "after_path": {"type": "string", "description": "Path to after dataset (parquet/csv)"},
                 "key_field": {"type": "string", "default": "__catalog_item_id"},
-                "deterministic_key_fields": {"type": "array", "items": {"type": "string"}, "description": "Optional fallback identity fields for deterministic row matching"},
-                "allow_row_index_fallback": {"type": "boolean", "default": True, "description": "Use stable row index as final deterministic fallback when key fields are missing"},
             },
             "required": ["before_path", "after_path"],
         },
@@ -507,7 +464,7 @@ TOOL_DEFINITIONS = [
                 "rules": {
                     "type": "object",
                     "properties": {
-                        "allow_row_deletes": {"type": "boolean", "default": True},
+                        "allow_row_deletes": {"type": "boolean", "default": False},
                         "max_change_ratio_warning": {"type": "number", "default": 0.2},
                     },
                 },
@@ -556,10 +513,6 @@ async def dispatch_tool(client: RastroClient, tool_name: str, arguments: Dict[st
         return await catalog_activity_get(client, CatalogActivityGetInput(**arguments))
     elif tool_name == "catalog_activity_get_staged_changes":
         return await catalog_activity_get_staged_changes(client, CatalogActivityGetStagedChangesInput(**arguments))
-    elif tool_name == "catalog_activity_audit":
-        return await catalog_activity_audit(client, CatalogActivityAuditInput(**arguments))
-    elif tool_name == "catalog_activity_clear":
-        return await catalog_activity_clear(client, CatalogActivityClearInput(**arguments))
     elif tool_name == "catalog_snapshot_list":
         return await catalog_snapshot_list(client, CatalogSnapshotListInput(**arguments))
     elif tool_name == "catalog_snapshot_create":

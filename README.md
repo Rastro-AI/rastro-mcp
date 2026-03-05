@@ -19,7 +19,12 @@ uv sync
 ## Required environment
 
 ```bash
+# Option A (recommended): API key auth
 export RASTRO_API_KEY="rastro_pk_..."
+
+# Option B: bearer token from web auth session
+# export RASTRO_ACCESS_TOKEN="<jwt>"
+
 export RASTRO_BASE_URL="https://catalogapi.rastro.ai/api"
 # optional
 # export RASTRO_ORGANIZATION_ID="<org_uuid>"

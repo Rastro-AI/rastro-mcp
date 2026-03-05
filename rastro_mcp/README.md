@@ -10,7 +10,12 @@ uv sync
 
 ## Required Environment
 ```bash
+# Option A (recommended): API key auth
 export RASTRO_API_KEY=<your_api_key>
+
+# Option B: bearer token from web auth session
+# export RASTRO_ACCESS_TOKEN=<jwt_token>
+
 # Optional override for local development:
 # export RASTRO_BASE_URL=http://127.0.0.1:8000/api
 # Production default:

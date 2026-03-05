@@ -30,6 +30,16 @@ export RASTRO_BASE_URL="https://catalogapi.rastro.ai/api"
 # export RASTRO_ORGANIZATION_ID="<org_uuid>"
 ```
 
+### Browser login from CLI (no copy/paste)
+
+```bash
+uv run rastro-mcp login
+# then apply the printed export in your shell:
+# export RASTRO_ACCESS_TOKEN='...'
+```
+
+This opens `dashboard.rastro.ai`, uses your existing web session, and redirects back to a localhost callback.
+
 ## Run (stdio)
 
 ```bash

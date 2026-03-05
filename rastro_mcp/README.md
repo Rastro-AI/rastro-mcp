@@ -10,16 +10,11 @@ uv sync
 
 ## Required Environment
 ```bash
-# Option A (recommended): API key auth
 export RASTRO_API_KEY=<your_api_key>
-
-# Option B: bearer token from web auth session
-# export RASTRO_ACCESS_TOKEN=<jwt_token>
-
-# Optional override for local development:
-# export RASTRO_BASE_URL=http://127.0.0.1:8000/api
-# Production default:
-# export RASTRO_BASE_URL=https://catalogapi.rastro.ai/api
+# Use local backend during development
+export RASTRO_BASE_URL=http://127.0.0.1:8000/api
+# or production API
+# export RASTRO_BASE_URL=https://api.rastro.ai/api
 ```
 
 ## Run MCP Server (stdio)
@@ -49,8 +44,8 @@ The server exposes one prompt only:
 ## Safety Defaults
 - `catalog_item_update` is disabled by default because public PUT replaces full item data.
   - Override only for break-glass runs: `RASTRO_MCP_ENABLE_DIRECT_ITEM_UPDATE=true`
-- Programmatic staged-change approve/apply is disabled in MCP.
-  - Review, approve, and apply from dashboard only.
+- Programmatic approve/apply is disabled by default.
+  - Override only for explicit automation runs: `RASTRO_MCP_ENABLE_ACTIVITY_APPLY=true`
 - Stage chunk size for very large activities can be tuned:
   - `RASTRO_MCP_STAGE_BATCH_SIZE` (default: `2000`)
   - `RASTRO_MCP_STAGE_RETRIES` (default: `3`)

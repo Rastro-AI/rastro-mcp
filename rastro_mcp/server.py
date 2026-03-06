@@ -46,6 +46,7 @@ from rastro_mcp.models.contracts import (
     ServiceImageListInput,
     ServiceImageRunInput,
     ServiceImageStatusInput,
+    ServiceJudgeCatalogRowsInput,
     ServiceMapToCatalogSchemaInput,
     StageDatasetInput,
     SnapshotPullInput,
@@ -81,6 +82,7 @@ from rastro_mcp.tools.service_tools import (
     service_image_list,
     service_image_run,
     service_image_status,
+    service_judge_catalog_rows,
     service_map_to_catalog_schema,
 )
 
@@ -375,17 +377,38 @@ TOOL_DEFINITIONS = [
     # ── Service tools ────────────────────────────────────────────────
     {
         "name": "service_map_to_catalog_schema",
-        "description": "Map source items to a target catalog schema using AI enrichment. Forces web_search=false.",
+        "description": "Map source items to a target catalog schema using AI enrichment. Uses full schema metadata and strict mapping guardrails; forces web_search=false.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "catalog_id": {"type": "string", "description": "Target catalog UUID"},
                 "items": {"type": "array", "description": "Source items to map"},
-                "prompt": {"type": "string", "default": "Map source fields to target catalog schema"},
+                "prompt": {"type": "string", "default": "Map source fields to target catalog schema. Prefer null over uncertain mappings."},
                 "async_mode": {"type": "boolean", "default": False},
                 "speed": {"type": "string", "enum": ["fast", "medium", "slow"], "default": "medium"},
             },
             "required": ["catalog_id", "items"],
+        },
+    },
+    {
+        "name": "service_judge_catalog_rows",
+        "description": "Remote judge for catalog results via /public/judge. Evaluates rows against schema/context and returns structured pass/review/fail judgments with field-level issues.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "rows": {"type": "array", "description": "Catalog rows/results to judge"},
+                "schema": {"type": "object", "description": "Schema object (optional if catalog_id provided)"},
+                "catalog_id": {"type": "string", "description": "Catalog UUID to fetch schema when schema is omitted"},
+                "context": {"type": "object", "description": "Optional additional context (business rules, source notes, taxonomy hints, etc.)"},
+                "rubric": {
+                    "type": "string",
+                    "default": "Judge whether each row is fit for listing against the schema. Prefer review_required when uncertain; do not hallucinate missing facts.",
+                },
+                "model": {"type": "string", "default": "gpt-5.2"},
+                "strictness": {"type": "string", "enum": ["low", "medium", "high"], "default": "medium"},
+                "max_rows": {"type": "integer", "default": 200},
+            },
+            "required": ["rows"],
         },
     },
     {
@@ -577,6 +600,8 @@ async def dispatch_tool(client: RastroClient, tool_name: str, arguments: Dict[st
     # Service tools
     elif tool_name == "service_map_to_catalog_schema":
         return await service_map_to_catalog_schema(client, ServiceMapToCatalogSchemaInput(**arguments))
+    elif tool_name == "service_judge_catalog_rows":
+        return await service_judge_catalog_rows(client, ServiceJudgeCatalogRowsInput(**arguments))
     elif tool_name == "service_image_run":
         return await service_image_run(client, ServiceImageRunInput(**arguments))
     elif tool_name == "service_image_status":

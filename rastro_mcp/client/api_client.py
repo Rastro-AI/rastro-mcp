@@ -426,5 +426,8 @@ class RastroClient:
     async def enrich(self, payload: dict) -> dict:
         return await self._request("POST", "/public/enrich", json=payload)
 
+    async def judge_catalog_rows(self, payload: dict) -> dict:
+        return await self._request("POST", "/public/judge", json=payload)
+
     async def get_enrich_job(self, job_id: str) -> dict:
         return await self._request("GET", f"/public/enrich/{job_id}")

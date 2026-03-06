@@ -97,6 +97,19 @@ def _extract_declared_schema_additions(schema_changes: Optional[Dict[str, Any]])
     return set()
 
 
+def _is_json_encoded_array_field(field_def: Dict[str, Any]) -> bool:
+    description = str(field_def.get("description", "")).lower()
+    return "json-encoded array" in description
+
+
+def _is_valid_json_array_string(value: str) -> bool:
+    try:
+        parsed = json.loads(value)
+    except Exception:
+        return False
+    return isinstance(parsed, list)
+
+
 def _validate_file_path(
     path: str,
     label: str,
@@ -285,10 +298,12 @@ async def bundle_validate(client: RastroClient, params: BundleValidateInput) -> 
 
     # ── Schema alignment checks ──────────────────────────────────────
     required_fields: List[str] = []
+    schema_properties: Dict[str, Dict[str, Any]] = {}
     if params.catalog_id:
         try:
             schema = await client.get_catalog_schema(params.catalog_id)
-            schema_fields = set(schema.get("schema_definition", {}).get("properties", {}).keys())
+            schema_properties = schema.get("schema_definition", {}).get("properties", {}) or {}
+            schema_fields = set(schema_properties.keys())
             required_fields = list(schema.get("schema_definition", {}).get("required", []))
             declared_new = _extract_declared_schema_additions(params.schema_changes)
 
@@ -334,6 +349,36 @@ async def bundle_validate(client: RastroClient, params: BundleValidateInput) -> 
                         message=f"New item at row_index={change.get('row_index', idx)} missing required fields: {missing}",
                     )
                 )
+
+    # ── Semantic field-format checks for schema-described fields ─────
+    if staged_changes and schema_properties:
+        for idx, change in enumerate(staged_changes):
+            after_data = change.get("after_data") or {}
+            if not isinstance(after_data, dict):
+                continue
+
+            row_index = change.get("row_index", idx)
+            for field, value in after_data.items():
+                if field not in schema_properties:
+                    continue
+                if value is None or not isinstance(value, str):
+                    continue
+                value_str = value.strip()
+                if not value_str:
+                    continue
+
+                field_def = schema_properties[field]
+                if _is_json_encoded_array_field(field_def) and not _is_valid_json_array_string(value_str):
+                    errors.append(
+                        ValidationIssue(
+                            code="FIELD_FORMAT_MISMATCH",
+                            message=(
+                                f"Field '{field}' at row_index={row_index} expects a JSON-encoded array string, "
+                                f"but received non-array content"
+                            ),
+                            fix_hint="Provide a JSON array string (e.g. '[\"SECTION 1\", \"SECTION 2\"]') or leave the field empty",
+                        )
+                    )
 
     # ── Large changeset warning ──────────────────────────────────────
     touched = 0

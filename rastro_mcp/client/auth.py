@@ -1,9 +1,9 @@
 """
 Authentication helpers for Rastro API.
 
-Supports:
-- API key auth (`RASTRO_API_KEY`)
-- Bearer token auth (`RASTRO_ACCESS_TOKEN` / `RASTRO_BEARER_TOKEN`)
+Supports two authentication methods:
+1. API key (RASTRO_API_KEY, rastro_pk_* prefix) - org-scoped
+2. Access token (RASTRO_ACCESS_TOKEN) - user session from `rastro-mcp login`
 """
 
 import os
@@ -15,14 +15,14 @@ from typing import Optional
 class RastroAuth:
     """Holds authentication credentials for Rastro API."""
 
-    token: str
+    api_key: str
     organization_id: Optional[str] = None
-    base_url: str = "https://catalogapi.rastro.ai/api"
+    base_url: str = "https://api.rastro.ai/api"
 
     @property
     def headers(self) -> dict:
         h = {
-            "Authorization": f"Bearer {self.token}",
+            "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
         if self.organization_id:
@@ -33,21 +33,24 @@ class RastroAuth:
 def load_auth_from_env() -> RastroAuth:
     """Load authentication from environment variables.
 
+    Tries RASTRO_API_KEY first (org API key), then falls back to
+    RASTRO_ACCESS_TOKEN (user session token from ``rastro-mcp login``).
+
     Env vars:
         RASTRO_API_KEY: API key (rastro_pk_*)
-        RASTRO_ACCESS_TOKEN: User bearer token from web auth session
-        RASTRO_BEARER_TOKEN: Alias for RASTRO_ACCESS_TOKEN
-        RASTRO_ORGANIZATION_ID: Organization UUID (optional, derived from key if absent)
-        RASTRO_BASE_URL: API base URL (default: https://catalogapi.rastro.ai/api)
+        RASTRO_ACCESS_TOKEN: User session token from browser login
+        RASTRO_ORGANIZATION_ID: Organization UUID (optional)
+        RASTRO_BASE_URL: API base URL (default: https://api.rastro.ai/api)
     """
-    token = os.environ.get("RASTRO_API_KEY") or os.environ.get("RASTRO_ACCESS_TOKEN") or os.environ.get("RASTRO_BEARER_TOKEN")
+    token = os.environ.get("RASTRO_API_KEY") or os.environ.get("RASTRO_ACCESS_TOKEN")
     if not token:
         raise ValueError(
-            "Authentication required: set one of RASTRO_API_KEY, RASTRO_ACCESS_TOKEN, or RASTRO_BEARER_TOKEN."
+            "Authentication required. Set RASTRO_API_KEY (org API key) "
+            "or run `rastro-mcp login` to set RASTRO_ACCESS_TOKEN."
         )
 
     return RastroAuth(
-        token=token,
+        api_key=token,
         organization_id=os.environ.get("RASTRO_ORGANIZATION_ID"),
-        base_url=os.environ.get("RASTRO_BASE_URL", "https://catalogapi.rastro.ai/api"),
+        base_url=os.environ.get("RASTRO_BASE_URL", "https://api.rastro.ai/api"),
     )

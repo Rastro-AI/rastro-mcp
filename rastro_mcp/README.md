@@ -10,16 +10,11 @@ uv sync
 
 ## Required Environment
 ```bash
-# Option A (recommended): API key auth
 export RASTRO_API_KEY=<your_api_key>
-
-# Option B: bearer token from web auth session
-# export RASTRO_ACCESS_TOKEN=<jwt_token>
-
-# Optional override for local development:
-# export RASTRO_BASE_URL=http://127.0.0.1:8000/api
-# Production default:
-# export RASTRO_BASE_URL=https://catalogapi.rastro.ai/api
+# Use local backend during development
+export RASTRO_BASE_URL=http://127.0.0.1:8000/api
+# or production API
+# export RASTRO_BASE_URL=https://api.rastro.ai/api
 ```
 
 ## Run MCP Server (stdio)
@@ -29,7 +24,7 @@ uv run python -m rastro_mcp.server
 
 ## Tools
 - `catalog_*`: catalog context + activity staging
-- `service_*`: mapping/image services
+- `service_*`: mapping/image services + remote judge (`service_judge_catalog_rows`)
 - `execution_*`: snapshot, diff, bundle validation
 
 ### Large Catalog / Large Diff Behavior

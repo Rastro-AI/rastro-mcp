@@ -305,9 +305,25 @@ class CatalogActivitySaveWorkflowInput(BaseModel):
 class ServiceMapToCatalogSchemaInput(BaseModel):
     catalog_id: str
     items: List[Dict[str, Any]]
-    prompt: str = "Map source fields to target catalog schema"
+    prompt: str = "Map source fields to target catalog schema. Prefer null over uncertain mappings."
     async_mode: bool = False
     speed: str = "medium"
+
+
+class ServiceJudgeCatalogRowsInput(BaseModel):
+    model_config = {"populate_by_name": True}
+
+    rows: List[Dict[str, Any]]
+    schema_input: Optional[Dict[str, Any]] = Field(default=None, alias="schema")
+    catalog_id: Optional[str] = None
+    context: Optional[Dict[str, Any]] = None
+    rubric: str = (
+        "Judge whether each row is fit for listing against the schema. "
+        "Prefer review_required when uncertain; do not hallucinate missing facts."
+    )
+    model: str = "gpt-5.2"
+    strictness: str = "medium"  # low|medium|high
+    max_rows: int = 200
 
 
 class ServiceImageRunInput(BaseModel):

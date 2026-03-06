@@ -11,9 +11,11 @@ import os
 from typing import Optional
 
 from rastro_mcp.client.api_client import RastroClient
+from rastro_mcp.execution.bundle_validate import bundle_validate
 from rastro_mcp.execution.diff_compute import diff_compute
 from rastro_mcp.execution.path_safety import resolve_workspace_path
 from rastro_mcp.models.contracts import (
+    BundleValidateInput,
     CatalogActivityCreateTransformInput,
     DiffComputeInput,
     ScriptInfo,
@@ -47,6 +49,23 @@ async def stage_dataset(client: RastroClient, params: StageDatasetInput) -> Stag
         )
     )
 
+    validation = await bundle_validate(
+        client,
+        BundleValidateInput(
+            catalog_id=params.catalog_id,
+            before_path=params.before_path,
+            after_path=params.after_path,
+            staged_changes_path=diff_result.staged_changes_path,
+            diff_summary=diff_result.diff_summary.model_dump(),
+            schema_changes=params.schema_changes,
+        ),
+    )
+    if not validation.valid:
+        preview = "; ".join([err.message for err in validation.errors[:3]])
+        raise ValueError(
+            f"Bundle validation failed with {len(validation.errors)} error(s). {preview}"
+        )
+
     script_info: Optional[ScriptInfo] = None
     if params.script_path:
         script_info = _load_script_info(params.script_path)
@@ -58,6 +77,7 @@ async def stage_dataset(client: RastroClient, params: StageDatasetInput) -> Stag
             activity_message=params.activity_message,
             script=script_info,
             diff_summary=diff_result.diff_summary.model_dump(),
+            validation_report=validation.model_dump(),
             staged_changes_file_path=diff_result.staged_changes_path,
             schema_changes=params.schema_changes,
             taxonomy_changes=params.taxonomy_changes,

@@ -13,8 +13,6 @@ Tools:
 - catalog_activity_list
 - catalog_activity_get
 - catalog_activity_get_staged_changes
-- catalog_activity_audit
-- catalog_activity_clear
 - catalog_activity_create_transform
 - catalog_snapshot_list
 - catalog_snapshot_create
@@ -27,7 +25,6 @@ import asyncio
 import json
 import os
 import webbrowser
-from collections import Counter
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
@@ -36,8 +33,6 @@ from rastro_mcp.execution.bundle_validate import bundle_validate
 from rastro_mcp.execution.path_safety import UnsafePathError, resolve_workspace_path
 from rastro_mcp.models.contracts import (
     BundleValidateInput,
-    CatalogActivityAuditInput,
-    CatalogActivityClearInput,
     CatalogActivityCreateTransformInput,
     CatalogActivityGetInput,
     CatalogActivitySaveWorkflowInput,
@@ -55,6 +50,7 @@ from rastro_mcp.models.contracts import (
     CatalogSnapshotListInput,
     CatalogSnapshotRestoreInput,
     CatalogTaxonomyGetInput,
+    CatalogUpdateQualityPromptInput,
     CreateTransformOutput,
     ValidationRules,
 )
@@ -123,6 +119,11 @@ async def catalog_taxonomy_get(client: RastroClient, params: CatalogTaxonomyGetI
     return await client.get_catalog_taxonomy(params.catalog_id)
 
 
+async def catalog_update_quality_prompt(client: RastroClient, params: CatalogUpdateQualityPromptInput) -> dict:
+    """Update the catalog's quality prompt used for judging and readiness checks."""
+    return await client.update_catalog_quality_prompt(params.catalog_id, params.prompt)
+
+
 async def catalog_items_query(client: RastroClient, params: CatalogItemsQueryInput) -> dict:
     """Query catalog items with pagination, search, and sorting."""
     return await client.get_catalog_items(
@@ -175,117 +176,6 @@ async def catalog_activity_get(client: RastroClient, params: CatalogActivityGetI
 async def catalog_activity_get_staged_changes(client: RastroClient, params: CatalogActivityGetStagedChangesInput) -> dict:
     """Get staged changes for a pending activity."""
     return await client.get_staged_changes(params.activity_id, limit=params.limit, offset=params.offset)
-
-
-async def catalog_activity_audit(client: RastroClient, params: CatalogActivityAuditInput) -> dict:
-    """Audit catalog activities with optional staged-change summaries."""
-    listing = await client.list_activities(
-        catalog_id=params.catalog_id,
-        status=params.status,
-        activity_type=params.activity_type,
-        limit=params.limit,
-        offset=params.offset,
-    )
-    activities = listing.get("activities", []) or []
-    status_counts = Counter(str(activity.get("status", "unknown")) for activity in activities)
-    type_counts = Counter(str(activity.get("type", "unknown")) for activity in activities)
-
-    if not params.include_staged_summary:
-        return {
-            "catalog_id": params.catalog_id,
-            "total": listing.get("total", len(activities)),
-            "status_counts": dict(status_counts),
-            "type_counts": dict(type_counts),
-            "activities": activities,
-        }
-
-    semaphore = asyncio.Semaphore(8)
-
-    async def _attach_summary(activity: Dict[str, Any]) -> Dict[str, Any]:
-        activity_id = activity.get("id")
-        if not activity_id:
-            enriched = dict(activity)
-            enriched["staged_summary"] = {"error": "missing_activity_id"}
-            return enriched
-
-        try:
-            async with semaphore:
-                summary = await client.get_activity_staged_changes_summary(activity_id)
-        except Exception as exc:
-            enriched = dict(activity)
-            enriched["staged_summary"] = {"error": str(exc)}
-            return enriched
-
-        enriched = dict(activity)
-        enriched["staged_summary"] = summary
-        return enriched
-
-    enriched_activities = await asyncio.gather(*(_attach_summary(activity) for activity in activities))
-    return {
-        "catalog_id": params.catalog_id,
-        "total": listing.get("total", len(enriched_activities)),
-        "status_counts": dict(status_counts),
-        "type_counts": dict(type_counts),
-        "activities": enriched_activities,
-    }
-
-
-async def catalog_activity_clear(client: RastroClient, params: CatalogActivityClearInput) -> dict:
-    """Clear stale activities by rejecting staged changes and optionally cancelling activities."""
-    if params.activity_ids:
-        candidate_ids = list(dict.fromkeys(params.activity_ids))
-    else:
-        listing = await client.list_activities(
-            catalog_id=params.catalog_id,
-            status=params.status,
-            activity_type=params.activity_type,
-            limit=params.limit,
-            offset=params.offset,
-        )
-        candidate_ids = [activity.get("id") for activity in (listing.get("activities", []) or []) if activity.get("id")]
-
-    results: List[Dict[str, Any]] = []
-    for activity_id in candidate_ids:
-        result: Dict[str, Any] = {"activity_id": activity_id}
-
-        try:
-            activity = await client.get_activity(activity_id)
-        except Exception as exc:
-            result["error"] = f"failed_to_fetch_activity: {exc}"
-            results.append(result)
-            continue
-
-        if str(activity.get("catalog_id")) != params.catalog_id:
-            result["error"] = "catalog_mismatch"
-            result["catalog_id"] = activity.get("catalog_id")
-            results.append(result)
-            continue
-
-        if params.reject_staged_changes:
-            try:
-                result["bulk_review"] = await client.bulk_review_activity_staged_changes(
-                    activity_id=activity_id,
-                    action="reject_all",
-                    rejection_reason=params.rejection_reason,
-                )
-            except Exception as exc:
-                result["bulk_review_error"] = str(exc)
-
-        if params.cancel_activity:
-            try:
-                result["cancel"] = await client.cancel_activity(activity_id)
-            except Exception as exc:
-                result["cancel_error"] = str(exc)
-
-        results.append(result)
-
-    success_count = sum(1 for entry in results if "error" not in entry and "bulk_review_error" not in entry and "cancel_error" not in entry)
-    return {
-        "catalog_id": params.catalog_id,
-        "selected_activity_count": len(candidate_ids),
-        "success_count": success_count,
-        "results": results,
-    }
 
 
 async def catalog_snapshot_list(client: RastroClient, params: CatalogSnapshotListInput) -> dict:

@@ -3,7 +3,8 @@ execution_catalog_stage_dataset
 
 One-command staging pipeline:
 1. Compute local diff between before/after datasets
-2. Create a single pending-review custom-transform activity
+2. Run bundle validation (including product-variant integrity)
+3. Create a single pending-review custom-transform activity
 """
 
 import hashlib
@@ -21,6 +22,7 @@ from rastro_mcp.models.contracts import (
     ScriptInfo,
     StageDatasetInput,
     StageDatasetOutput,
+    ValidationRules,
 )
 from rastro_mcp.tools.catalog_tools import catalog_activity_create_transform
 
@@ -38,33 +40,33 @@ def _load_script_info(script_path: str) -> ScriptInfo:
 
 
 async def stage_dataset(client: RastroClient, params: StageDatasetInput) -> StageDatasetOutput:
-    """Compute diff and stage all changes into a single pending-review activity."""
+    """Compute diff, validate bundle, and stage all changes into a single pending-review activity."""
     diff_result = await diff_compute(
         DiffComputeInput(
             before_path=params.before_path,
             after_path=params.after_path,
             key_field=params.key_field,
-            deterministic_key_fields=params.deterministic_key_fields,
-            allow_row_index_fallback=params.allow_row_index_fallback,
         )
     )
 
+    # Run bundle validation before staging (catches schema mismatches, orphan product_ids, etc.)
     validation = await bundle_validate(
         client,
         BundleValidateInput(
             catalog_id=params.catalog_id,
             before_path=params.before_path,
             after_path=params.after_path,
+            script_path=params.script_path,
             staged_changes_path=diff_result.staged_changes_path,
             diff_summary=diff_result.diff_summary.model_dump(),
             schema_changes=params.schema_changes,
+            taxonomy_changes=params.taxonomy_changes,
+            rules=ValidationRules(),
         ),
     )
     if not validation.valid:
-        preview = "; ".join([err.message for err in validation.errors[:3]])
-        raise ValueError(
-            f"Bundle validation failed with {len(validation.errors)} error(s). {preview}"
-        )
+        error_msgs = "; ".join(e.message for e in validation.errors)
+        raise ValueError(f"Bundle validation failed: {error_msgs}")
 
     script_info: Optional[ScriptInfo] = None
     if params.script_path:
@@ -93,10 +95,6 @@ async def stage_dataset(client: RastroClient, params: StageDatasetInput) -> Stag
         staged_count=staged.staged_count,
         review_url=staged.review_url,
         staged_changes_path=diff_result.staged_changes_path,
-        diff_details_path=diff_result.diff_details_path,
         diff_summary=diff_result.diff_summary,
         sample_changes=diff_result.sample_changes,
-        field_change_counts=diff_result.field_change_counts,
-        entity_type_change_counts=diff_result.entity_type_change_counts,
-        key_diagnostics=diff_result.key_diagnostics,
     )

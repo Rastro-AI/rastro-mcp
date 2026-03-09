@@ -317,8 +317,8 @@ class RastroClient:
     async def apply_activity(self, activity_id: str) -> dict:
         """Apply approved staged changes for an activity."""
         raise PermissionError(
-            "Programmatic apply is disabled in MCP. "
-            "Apply from dashboard review after manual approval."
+            "Programmatic activity apply is disabled in MCP. "
+            "Review and apply in the dashboard."
         )
 
     # ── Activity endpoints ──────────────────────────────────────────────
@@ -333,12 +333,6 @@ class RastroClient:
 
     async def get_activity(self, activity_id: str) -> dict:
         return await self._request("GET", f"/activities/{activity_id}")
-
-    async def get_activity_staged_changes_summary(self, activity_id: str) -> dict:
-        return await self._request("GET", f"/activities/{activity_id}/staged-changes/summary")
-
-    async def cancel_activity(self, activity_id: str) -> dict:
-        return await self._request("POST", f"/activities/{activity_id}/cancel")
 
     async def create_custom_transform_activity(self, catalog_id: str, payload: dict) -> dict:
         return await self._request("POST", f"/public/catalogs/{catalog_id}/activities/custom-transform", json=payload)
@@ -428,6 +422,12 @@ class RastroClient:
 
     async def judge_catalog_rows(self, payload: dict) -> dict:
         return await self._request("POST", "/public/judge", json=payload)
+
+    async def get_catalog_quality_prompt(self, catalog_id: str) -> dict:
+        return await self._request("GET", f"/public/catalogs/{catalog_id}/quality-prompt")
+
+    async def update_catalog_quality_prompt(self, catalog_id: str, prompt: str) -> dict:
+        return await self._request("PUT", f"/public/catalogs/{catalog_id}/quality-prompt", json={"prompt": prompt})
 
     async def get_enrich_job(self, job_id: str) -> dict:
         return await self._request("GET", f"/public/enrich/{job_id}")

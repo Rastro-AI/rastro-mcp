@@ -97,19 +97,6 @@ def _extract_declared_schema_additions(schema_changes: Optional[Dict[str, Any]])
     return set()
 
 
-def _is_json_encoded_array_field(field_def: Dict[str, Any]) -> bool:
-    description = str(field_def.get("description", "")).lower()
-    return "json-encoded array" in description
-
-
-def _is_valid_json_array_string(value: str) -> bool:
-    try:
-        parsed = json.loads(value)
-    except Exception:
-        return False
-    return isinstance(parsed, list)
-
-
 def _validate_file_path(
     path: str,
     label: str,
@@ -298,12 +285,10 @@ async def bundle_validate(client: RastroClient, params: BundleValidateInput) -> 
 
     # ── Schema alignment checks ──────────────────────────────────────
     required_fields: List[str] = []
-    schema_properties: Dict[str, Dict[str, Any]] = {}
     if params.catalog_id:
         try:
             schema = await client.get_catalog_schema(params.catalog_id)
-            schema_properties = schema.get("schema_definition", {}).get("properties", {}) or {}
-            schema_fields = set(schema_properties.keys())
+            schema_fields = set(schema.get("schema_definition", {}).get("properties", {}).keys())
             required_fields = list(schema.get("schema_definition", {}).get("required", []))
             declared_new = _extract_declared_schema_additions(params.schema_changes)
 
@@ -350,35 +335,59 @@ async def bundle_validate(client: RastroClient, params: BundleValidateInput) -> 
                     )
                 )
 
-    # ── Semantic field-format checks for schema-described fields ─────
-    if staged_changes and schema_properties:
-        for idx, change in enumerate(staged_changes):
-            after_data = change.get("after_data") or {}
-            if not isinstance(after_data, dict):
-                continue
+    # ── Product-variant integrity checks ────────────────────────────
+    if params.catalog_id and staged_changes is not None:
+        try:
+            catalog_info = await client.get_catalog(params.catalog_id)
+            variant_mode = catalog_info.get("variant_mode") or catalog_info.get("config", {}).get("variant_mode")
+            if variant_mode == "product_grouped":
+                # Collect product_ids referenced by variant rows in this changeset
+                variant_product_ids: Set[str] = set()
+                staged_product_ids: Set[str] = set()
+                for change in staged_changes:
+                    entity_type = change.get("catalog_item_entity_type", "")
+                    after_data = change.get("after_data") or {}
+                    pid = after_data.get("product_id")
+                    if entity_type == "product" and pid:
+                        staged_product_ids.add(str(pid))
+                    elif entity_type == "variant" and pid:
+                        variant_product_ids.add(str(pid))
+                    elif not entity_type and pid:
+                        # Untyped rows with product_id are assumed variants
+                        variant_product_ids.add(str(pid))
 
-            row_index = change.get("row_index", idx)
-            for field, value in after_data.items():
-                if field not in schema_properties:
-                    continue
-                if value is None or not isinstance(value, str):
-                    continue
-                value_str = value.strip()
-                if not value_str:
-                    continue
-
-                field_def = schema_properties[field]
-                if _is_json_encoded_array_field(field_def) and not _is_valid_json_array_string(value_str):
-                    errors.append(
-                        ValidationIssue(
-                            code="FIELD_FORMAT_MISMATCH",
-                            message=(
-                                f"Field '{field}' at row_index={row_index} expects a JSON-encoded array string, "
-                                f"but received non-array content"
-                            ),
-                            fix_hint="Provide a JSON array string (e.g. '[\"SECTION 1\", \"SECTION 2\"]') or leave the field empty",
+                orphan_pids = variant_product_ids - staged_product_ids
+                if orphan_pids:
+                    # Check if these product parents already exist in the catalog
+                    try:
+                        existing_items = await client.get_catalog_items(params.catalog_id, limit=1, offset=0)
+                        # If the catalog has existing items, orphan product_ids might already exist.
+                        # We can't cheaply verify every ID, so downgrade to warning.
+                        warnings.append(
+                            ValidationIssue(
+                                code="ORPHAN_PRODUCT_IDS",
+                                message=(
+                                    f"{len(orphan_pids)} variant product_id(s) have no matching product parent row in this changeset: "
+                                    f"{sorted(orphan_pids)[:5]}{'...' if len(orphan_pids) > 5 else ''}. "
+                                    f"Verify these product parents already exist in the catalog."
+                                ),
+                                fix_hint="Include product parent rows (catalog_item_entity_type='product') in staged changes, or confirm they exist in the catalog.",
+                            )
                         )
-                    )
+                    except Exception:
+                        # Can't check catalog — treat as error to be safe
+                        errors.append(
+                            ValidationIssue(
+                                code="ORPHAN_PRODUCT_IDS",
+                                message=(
+                                    f"{len(orphan_pids)} variant product_id(s) have no matching product parent row in this changeset: "
+                                    f"{sorted(orphan_pids)[:5]}{'...' if len(orphan_pids) > 5 else ''}"
+                                ),
+                                fix_hint="Include product parent rows (catalog_item_entity_type='product') for every distinct product_id.",
+                            )
+                        )
+        except Exception:
+            pass  # Can't fetch catalog info — skip product-variant checks
 
     # ── Large changeset warning ──────────────────────────────────────
     touched = 0

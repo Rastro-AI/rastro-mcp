@@ -23,8 +23,6 @@ from rastro_mcp.client.api_client import RastroClient
 from rastro_mcp.client.auth import RastroAuth, load_auth_from_env
 from rastro_mcp.models.contracts import (
     BundleValidateInput,
-    CatalogActivityAuditInput,
-    CatalogActivityClearInput,
     CatalogActivityCreateTransformInput,
     CatalogActivityGetInput,
     CatalogActivitySaveWorkflowInput,
@@ -42,6 +40,7 @@ from rastro_mcp.models.contracts import (
     CatalogSnapshotListInput,
     CatalogSnapshotRestoreInput,
     CatalogTaxonomyGetInput,
+    CatalogUpdateQualityPromptInput,
     DiffComputeInput,
     ServiceImageListInput,
     ServiceImageRunInput,
@@ -53,8 +52,6 @@ from rastro_mcp.models.contracts import (
 )
 from rastro_mcp.tools.catalog_tools import (
     catalog_activity_create_transform,
-    catalog_activity_audit,
-    catalog_activity_clear,
     catalog_activity_get,
     catalog_activity_save_workflow,
     catalog_activity_get_staged_changes,
@@ -71,6 +68,7 @@ from rastro_mcp.tools.catalog_tools import (
     catalog_snapshot_list,
     catalog_snapshot_restore,
     catalog_taxonomy_get,
+    catalog_update_quality_prompt,
 )
 from rastro_mcp.tools.execution_tools import (
     execution_bundle_validate,
@@ -159,6 +157,18 @@ TOOL_DEFINITIONS = [
         },
     },
     {
+        "name": "catalog_update_quality_prompt",
+        "description": "Set the catalog's quality prompt (used by the judge tool and readiness checks). Pass the full prompt text to replace the current one.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "catalog_id": {"type": "string", "description": "Catalog UUID"},
+                "prompt": {"type": "string", "description": "Quality prompt text — criteria for judging rows"},
+            },
+            "required": ["catalog_id", "prompt"],
+        },
+    },
+    {
         "name": "catalog_items_query",
         "description": "Query catalog items with pagination, text search, and field sorting.",
         "inputSchema": {
@@ -236,41 +246,6 @@ TOOL_DEFINITIONS = [
                 "offset": {"type": "integer", "default": 0, "description": "Offset for pagination"},
             },
             "required": ["activity_id"],
-        },
-    },
-    {
-        "name": "catalog_activity_audit",
-        "description": "Audit activities for a catalog with status/type counts and optional staged-change summaries.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "catalog_id": {"type": "string", "description": "Catalog UUID"},
-                "status": {"type": "string", "description": "Optional activity status filter"},
-                "activity_type": {"type": "string", "description": "Optional activity type filter"},
-                "limit": {"type": "integer", "default": 50},
-                "offset": {"type": "integer", "default": 0},
-                "include_staged_summary": {"type": "boolean", "default": True},
-            },
-            "required": ["catalog_id"],
-        },
-    },
-    {
-        "name": "catalog_activity_clear",
-        "description": "Clear stale activities by rejecting staged changes and optionally cancelling activities.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "catalog_id": {"type": "string", "description": "Catalog UUID"},
-                "activity_ids": {"type": "array", "items": {"type": "string"}, "description": "Specific activity IDs to clear"},
-                "status": {"type": "string", "default": "pending_review", "description": "Status filter when activity_ids is omitted"},
-                "activity_type": {"type": "string", "description": "Type filter when activity_ids is omitted"},
-                "limit": {"type": "integer", "default": 100},
-                "offset": {"type": "integer", "default": 0},
-                "rejection_reason": {"type": "string", "default": "Superseded by a newer staged update"},
-                "reject_staged_changes": {"type": "boolean", "default": True},
-                "cancel_activity": {"type": "boolean", "default": True},
-            },
-            "required": ["catalog_id"],
         },
     },
     {
@@ -377,13 +352,13 @@ TOOL_DEFINITIONS = [
     # ── Service tools ────────────────────────────────────────────────
     {
         "name": "service_map_to_catalog_schema",
-        "description": "Map source items to a target catalog schema using AI enrichment. Uses full schema metadata and strict mapping guardrails; forces web_search=false.",
+        "description": "Map source items to a target catalog schema using AI enrichment. Forces web_search=false.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "catalog_id": {"type": "string", "description": "Target catalog UUID"},
                 "items": {"type": "array", "description": "Source items to map"},
-                "prompt": {"type": "string", "default": "Map source fields to target catalog schema. Prefer null over uncertain mappings."},
+                "prompt": {"type": "string", "default": "Map source fields to target catalog schema"},
                 "async_mode": {"type": "boolean", "default": False},
                 "speed": {"type": "string", "enum": ["fast", "medium", "slow"], "default": "medium"},
             },
@@ -392,20 +367,15 @@ TOOL_DEFINITIONS = [
     },
     {
         "name": "service_judge_catalog_rows",
-        "description": "Remote judge for catalog results via /public/judge. Evaluates rows against schema/context and returns structured pass/review/fail judgments with field-level issues.",
+        "description": "Judge catalog rows for data quality. Uses the catalog's schema and quality_prompt automatically when catalog_id is provided.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "rows": {"type": "array", "description": "Catalog rows/results to judge"},
-                "schema": {"type": "object", "description": "Schema object (optional if catalog_id provided)"},
-                "catalog_id": {"type": "string", "description": "Catalog UUID to fetch schema when schema is omitted"},
-                "context": {"type": "object", "description": "Optional additional context (business rules, source notes, taxonomy hints, etc.)"},
-                "rubric": {
-                    "type": "string",
-                    "default": "Judge whether each row is fit for listing against the schema. Prefer review_required when uncertain; do not hallucinate missing facts.",
-                },
-                "model": {"type": "string", "default": "gpt-5.2"},
-                "strictness": {"type": "string", "enum": ["low", "medium", "high"], "default": "medium"},
+                "rows": {"type": "array", "description": "Rows to evaluate"},
+                "catalog_id": {"type": "string", "description": "Catalog UUID (loads schema + quality_prompt automatically)"},
+                "schema": {"type": "object", "description": "Inline schema (only if no catalog_id)"},
+                "prompt": {"type": "string", "description": "Extra judging instructions (appended to catalog's quality_prompt)"},
+                "model": {"type": "string", "default": "fast", "description": "Model preset: fast, medium, high"},
                 "max_rows": {"type": "integer", "default": 200},
             },
             "required": ["rows"],
@@ -477,7 +447,7 @@ TOOL_DEFINITIONS = [
     },
     {
         "name": "execution_catalog_stage_dataset",
-        "description": "One-command staging: compute diff from before/after datasets and create one pending-review activity with all staged changes.",
+        "description": "One-command staging: compute diff from before/after datasets and create one pending-review activity. For product_grouped catalogs, validates that every variant's product_id has a matching product parent row.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -485,9 +455,7 @@ TOOL_DEFINITIONS = [
                 "before_path": {"type": "string", "description": "Path to before dataset (parquet/csv)"},
                 "after_path": {"type": "string", "description": "Path to after dataset (parquet/csv)"},
                 "activity_message": {"type": "string", "description": "Human-readable review message"},
-                "key_field": {"type": "string", "default": "__catalog_item_id"},
-                "deterministic_key_fields": {"type": "array", "items": {"type": "string"}, "description": "Optional fallback identity fields for deterministic row matching"},
-                "allow_row_index_fallback": {"type": "boolean", "default": True, "description": "Use stable row index as final deterministic fallback when key fields are missing"},
+                "key_field": {"type": "string", "default": "__catalog_item_id", "description": "Column used to match rows. Null-key rows are treated as new inserts."},
                 "script_path": {"type": "string", "description": "Optional Python script path for audit provenance"},
                 "schema_changes": {"type": "object"},
                 "taxonomy_changes": {"type": "object"},
@@ -506,9 +474,7 @@ TOOL_DEFINITIONS = [
             "properties": {
                 "before_path": {"type": "string", "description": "Path to before dataset (parquet/csv)"},
                 "after_path": {"type": "string", "description": "Path to after dataset (parquet/csv)"},
-                "key_field": {"type": "string", "default": "__catalog_item_id"},
-                "deterministic_key_fields": {"type": "array", "items": {"type": "string"}, "description": "Optional fallback identity fields for deterministic row matching"},
-                "allow_row_index_fallback": {"type": "boolean", "default": True, "description": "Use stable row index as final deterministic fallback when key fields are missing"},
+                "key_field": {"type": "string", "default": "__catalog_item_id", "description": "Column used to match rows between datasets. Rows with null key are treated as new inserts. Use a business key (e.g. SKU column) to match by that field instead of database ID."},
             },
             "required": ["before_path", "after_path"],
         },
@@ -530,7 +496,7 @@ TOOL_DEFINITIONS = [
                 "rules": {
                     "type": "object",
                     "properties": {
-                        "allow_row_deletes": {"type": "boolean", "default": True},
+                        "allow_row_deletes": {"type": "boolean", "default": False},
                         "max_change_ratio_warning": {"type": "number", "default": 0.2},
                     },
                 },
@@ -562,6 +528,8 @@ async def dispatch_tool(client: RastroClient, tool_name: str, arguments: Dict[st
         return await catalog_schema_get(client, CatalogSchemaGetInput(**arguments))
     elif tool_name == "catalog_taxonomy_get":
         return await catalog_taxonomy_get(client, CatalogTaxonomyGetInput(**arguments))
+    elif tool_name == "catalog_update_quality_prompt":
+        return await catalog_update_quality_prompt(client, CatalogUpdateQualityPromptInput(**arguments))
     elif tool_name == "catalog_items_query":
         return await catalog_items_query(client, CatalogItemsQueryInput(**arguments))
     elif tool_name == "catalog_item_get":
@@ -579,10 +547,6 @@ async def dispatch_tool(client: RastroClient, tool_name: str, arguments: Dict[st
         return await catalog_activity_get(client, CatalogActivityGetInput(**arguments))
     elif tool_name == "catalog_activity_get_staged_changes":
         return await catalog_activity_get_staged_changes(client, CatalogActivityGetStagedChangesInput(**arguments))
-    elif tool_name == "catalog_activity_audit":
-        return await catalog_activity_audit(client, CatalogActivityAuditInput(**arguments))
-    elif tool_name == "catalog_activity_clear":
-        return await catalog_activity_clear(client, CatalogActivityClearInput(**arguments))
     elif tool_name == "catalog_snapshot_list":
         return await catalog_snapshot_list(client, CatalogSnapshotListInput(**arguments))
     elif tool_name == "catalog_snapshot_create":

@@ -45,8 +45,6 @@ class StageDatasetInput(BaseModel):
     after_path: str
     activity_message: str
     key_field: str = "__catalog_item_id"
-    deterministic_key_fields: Optional[List[str]] = None
-    allow_row_index_fallback: bool = True
     script_path: Optional[str] = None
     schema_changes: Optional[Dict[str, Any]] = None
     taxonomy_changes: Optional[Dict[str, Any]] = None
@@ -59,8 +57,6 @@ class DiffComputeInput(BaseModel):
     before_path: str
     after_path: str
     key_field: str = "__catalog_item_id"
-    deterministic_key_fields: Optional[List[str]] = None
-    allow_row_index_fallback: bool = True
 
 
 class DiffSummary(BaseModel):
@@ -83,11 +79,7 @@ class SampleChange(BaseModel):
 class DiffComputeOutput(BaseModel):
     diff_summary: DiffSummary
     staged_changes_path: str
-    diff_details_path: str
     sample_changes: List[SampleChange] = Field(default_factory=list)
-    field_change_counts: Dict[str, int] = Field(default_factory=dict)
-    entity_type_change_counts: Dict[str, Dict[str, int]] = Field(default_factory=dict)
-    key_diagnostics: Dict[str, Any] = Field(default_factory=dict)
 
 
 class StageDatasetOutput(BaseModel):
@@ -96,12 +88,8 @@ class StageDatasetOutput(BaseModel):
     staged_count: int
     review_url: str
     staged_changes_path: str
-    diff_details_path: str
     diff_summary: DiffSummary
     sample_changes: List[SampleChange] = Field(default_factory=list)
-    field_change_counts: Dict[str, int] = Field(default_factory=dict)
-    entity_type_change_counts: Dict[str, Dict[str, int]] = Field(default_factory=dict)
-    key_diagnostics: Dict[str, Any] = Field(default_factory=dict)
 
 
 class StagedChangeRow(BaseModel):
@@ -115,7 +103,7 @@ class StagedChangeRow(BaseModel):
 
 
 class ValidationRules(BaseModel):
-    allow_row_deletes: bool = True
+    allow_row_deletes: bool = False
     max_change_ratio_warning: float = 0.2
 
 
@@ -205,27 +193,6 @@ class CatalogActivityGetStagedChangesInput(BaseModel):
     offset: int = 0
 
 
-class CatalogActivityAuditInput(BaseModel):
-    catalog_id: str
-    status: Optional[str] = None
-    activity_type: Optional[str] = None
-    limit: int = 50
-    offset: int = 0
-    include_staged_summary: bool = True
-
-
-class CatalogActivityClearInput(BaseModel):
-    catalog_id: str
-    activity_ids: Optional[List[str]] = None
-    status: Optional[str] = "pending_review"
-    activity_type: Optional[str] = None
-    limit: int = 100
-    offset: int = 0
-    rejection_reason: str = "Superseded by a newer staged update"
-    reject_staged_changes: bool = True
-    cancel_activity: bool = True
-
-
 class ScriptInfo(BaseModel):
     filename: str
     content: str
@@ -302,10 +269,15 @@ class CatalogActivitySaveWorkflowInput(BaseModel):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
+class CatalogUpdateQualityPromptInput(BaseModel):
+    catalog_id: str
+    prompt: str
+
+
 class ServiceMapToCatalogSchemaInput(BaseModel):
     catalog_id: str
     items: List[Dict[str, Any]]
-    prompt: str = "Map source fields to target catalog schema. Prefer null over uncertain mappings."
+    prompt: str = "Map source fields to target catalog schema"
     async_mode: bool = False
     speed: str = "medium"
 
@@ -314,15 +286,10 @@ class ServiceJudgeCatalogRowsInput(BaseModel):
     model_config = {"populate_by_name": True}
 
     rows: List[Dict[str, Any]]
-    schema_input: Optional[Dict[str, Any]] = Field(default=None, alias="schema")
     catalog_id: Optional[str] = None
-    context: Optional[Dict[str, Any]] = None
-    rubric: str = (
-        "Judge whether each row is fit for listing against the schema. "
-        "Prefer review_required when uncertain; do not hallucinate missing facts."
-    )
-    model: str = "gpt-5.2"
-    strictness: str = "medium"  # low|medium|high
+    schema_input: Optional[Dict[str, Any]] = Field(default=None, alias="schema")
+    prompt: Optional[str] = None
+    model: str = "fast"
     max_rows: int = 200
 
 

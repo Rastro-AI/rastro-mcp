@@ -41,6 +41,7 @@ from rastro_mcp.models.contracts import (
     CatalogSnapshotRestoreInput,
     CatalogTaxonomyGetInput,
     CatalogUpdateQualityPromptInput,
+    CatalogVisualizeLocalInput,
     DiffComputeInput,
     ServiceImageListInput,
     ServiceImageRunInput,
@@ -83,6 +84,7 @@ from rastro_mcp.tools.service_tools import (
     service_judge_catalog_rows,
     service_map_to_catalog_schema,
 )
+from rastro_mcp.tools.viewer_tools import catalog_visualize_local
 
 
 def _is_truthy_env(name: str) -> bool:
@@ -246,6 +248,24 @@ TOOL_DEFINITIONS = [
                 "offset": {"type": "integer", "default": 0, "description": "Offset for pagination"},
             },
             "required": ["activity_id"],
+        },
+    },
+    {
+        "name": "catalog_visualize_local",
+        "description": "Build a local HTML artifact for visually inspecting a catalog or an activity's staged changes, then optionally open it in the browser.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "catalog_id": {"type": "string", "description": "Catalog UUID to visualize"},
+                "activity_id": {"type": "string", "description": "Activity UUID to visualize"},
+                "mode": {"type": "string", "enum": ["auto", "catalog", "activity"], "default": "auto"},
+                "title": {"type": "string", "description": "Optional custom viewer title"},
+                "limit": {"type": "integer", "default": 500, "description": "Maximum matching records to load into the artifact"},
+                "offset": {"type": "integer", "default": 0, "description": "Offset into the matching record set"},
+                "search": {"type": "string", "description": "Optional text search to narrow what the viewer loads"},
+                "output_dir": {"type": "string", "default": "./work/visualizations", "description": "Workspace-local directory where the artifact will be written"},
+                "open_browser": {"type": "boolean", "default": True, "description": "Best-effort browser open after generating the artifact"},
+            },
         },
     },
     {
@@ -547,6 +567,9 @@ async def dispatch_tool(client: RastroClient, tool_name: str, arguments: Dict[st
         return await catalog_activity_get(client, CatalogActivityGetInput(**arguments))
     elif tool_name == "catalog_activity_get_staged_changes":
         return await catalog_activity_get_staged_changes(client, CatalogActivityGetStagedChangesInput(**arguments))
+    elif tool_name == "catalog_visualize_local":
+        result = await catalog_visualize_local(client, CatalogVisualizeLocalInput(**arguments))
+        return result.model_dump()
     elif tool_name == "catalog_snapshot_list":
         return await catalog_snapshot_list(client, CatalogSnapshotListInput(**arguments))
     elif tool_name == "catalog_snapshot_create":

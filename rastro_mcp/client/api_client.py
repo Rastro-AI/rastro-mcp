@@ -294,6 +294,10 @@ class RastroClient:
             params={"page": page, "page_size": limit},
         )
 
+    async def get_staged_changes_summary(self, activity_id: str) -> dict:
+        """Get staged-change summary for an activity, including field completion stats when available."""
+        return await self._request("GET", f"/activities/{activity_id}/staged-changes/summary")
+
     async def bulk_review_activity_staged_changes(
         self,
         activity_id: str,

@@ -7,7 +7,7 @@ These contracts define the exact shape of data flowing through each MCP tool.
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -191,6 +191,49 @@ class CatalogActivityGetStagedChangesInput(BaseModel):
     activity_id: str
     limit: int = 50
     offset: int = 0
+
+
+class CatalogVisualizeLocalInput(BaseModel):
+    catalog_id: Optional[str] = None
+    activity_id: Optional[str] = None
+    mode: str = "auto"
+    title: Optional[str] = None
+    limit: int = Field(default=500, ge=1, le=1000)
+    offset: int = Field(default=0, ge=0)
+    search: Optional[str] = None
+    output_dir: str = "./work/visualizations"
+    open_browser: bool = True
+
+    @model_validator(mode="after")
+    def validate_target(self):
+        if not self.catalog_id and not self.activity_id:
+            raise ValueError("Provide at least one of catalog_id or activity_id")
+
+        mode = (self.mode or "auto").lower()
+        if mode not in {"auto", "catalog", "activity"}:
+            raise ValueError("mode must be one of: auto, catalog, activity")
+
+        if mode == "catalog" and not self.catalog_id:
+            raise ValueError("catalog_id is required when mode='catalog'")
+        if mode == "activity" and not self.activity_id:
+            raise ValueError("activity_id is required when mode='activity'")
+        return self
+
+
+class CatalogVisualizeLocalOutput(BaseModel):
+    mode: str
+    title: str
+    catalog_id: Optional[str] = None
+    activity_id: Optional[str] = None
+    artifact_dir: str
+    bundle_path: str
+    viewer_path: str
+    viewer_url: str
+    loaded_records: int
+    total_available: int
+    browser_open_attempted: bool = False
+    opened_in_browser: bool = False
+    warnings: List[str] = Field(default_factory=list)
 
 
 class ScriptInfo(BaseModel):

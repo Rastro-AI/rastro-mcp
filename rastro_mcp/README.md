@@ -1,6 +1,6 @@
 # Rastro MCP
 
-MCP server for Rastro catalog operations. Exposes 26 tools across three categories for use with Claude, Codex, or any MCP-compatible client.
+MCP server for Rastro catalog operations. Exposes catalog, service, execution, and local visualization tools for use with Claude, Codex, or any MCP-compatible client.
 
 ## Install
 
@@ -173,6 +173,23 @@ Get staged changes for a pending activity. Returns paginated before/after data p
 | `activity_id` | string | yes | Activity UUID |
 | `limit` | integer | no | Max results per page (default: 50) |
 | `offset` | integer | no | Pagination offset (default: 0) |
+
+#### `catalog_visualize_local`
+Build a self-contained local HTML viewer for either a catalog or an activity's staged changes, then optionally open it in the default browser.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `catalog_id` | string | conditional | Catalog UUID to visualize |
+| `activity_id` | string | conditional | Activity UUID to visualize |
+| `mode` | string | no | `auto`, `catalog`, or `activity` (default: auto) |
+| `title` | string | no | Custom title shown in the viewer |
+| `limit` | integer | no | Max matching records to load (default: 500) |
+| `offset` | integer | no | Offset into the matching records (default: 0) |
+| `search` | string | no | Optional search filter passed to the backend |
+| `output_dir` | string | no | Artifact output directory (default: `./work/visualizations`) |
+| `open_browser` | boolean | no | Best-effort browser open after artifact generation (default: true) |
+
+Outputs a `bundle.json`, a static `viewer.html`, and a localhost `viewer_url`. Prefer the `viewer_url` over opening `viewer.html` directly; the localhost path enables the local media proxy for remote images/documents. The artifact files are still usable when browser launch fails (for example in headless shells).
 
 #### `catalog_activity_create_transform`
 Create a custom transform activity with staged changes, script provenance, and audit metadata. Validates the bundle, stages all changes into a single pending-review activity (chunked internally if needed), and opens the dashboard review URL.
@@ -358,10 +375,11 @@ Single unified prompt guiding the agent through catalog operations, product-vari
 
 ```
 1. catalog_get / catalog_schema_get      -- understand the catalog
-2. execution_catalog_snapshot_pull        -- pull data to local parquet
-3. (your Python transform script)        -- modify the data
-4. execution_catalog_stage_dataset       -- diff + validate + stage
-5. Review in dashboard                   -- approve and apply
+2. catalog_visualize_local               -- inspect catalog state or staged changes visually when useful
+3. execution_catalog_snapshot_pull       -- pull data to local parquet
+4. (your Python transform script)        -- modify the data
+5. execution_catalog_stage_dataset       -- diff + validate + stage
+6. Review in dashboard                   -- approve and apply
 ```
 
 ## Large Catalog Behavior

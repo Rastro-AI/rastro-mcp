@@ -35,11 +35,11 @@ from rastro_mcp.models.contracts import (
     BundleValidateInput,
     CatalogActivityCreateTransformInput,
     CatalogActivityGetInput,
-    CatalogActivitySaveWorkflowInput,
     CatalogActivityGetStagedChangesInput,
     CatalogActivityListInput,
-    CatalogDuplicateInput,
+    CatalogActivitySaveWorkflowInput,
     CatalogDeleteInput,
+    CatalogDuplicateInput,
     CatalogGetInput,
     CatalogItemGetInput,
     CatalogItemsQueryInput,
@@ -54,6 +54,7 @@ from rastro_mcp.models.contracts import (
     CreateTransformOutput,
     ValidationRules,
 )
+
 
 def _should_open_review_url(url: str) -> bool:
     try:
@@ -125,11 +126,12 @@ async def catalog_update_quality_prompt(client: RastroClient, params: CatalogUpd
 
 
 async def catalog_items_query(client: RastroClient, params: CatalogItemsQueryInput) -> dict:
-    """Query catalog items with pagination, search, and sorting."""
-    return await client.get_catalog_items(
+    """Query raw catalog items with pagination, search, sorting, and entity-type awareness."""
+    return await client.get_catalog_raw_items(
         catalog_id=params.catalog_id,
         limit=params.limit,
         offset=params.offset,
+        entity_type=params.entity_type,
         search=params.search,
         sort_field=params.sort_field,
         sort_order=params.sort_order,
@@ -137,8 +139,8 @@ async def catalog_items_query(client: RastroClient, params: CatalogItemsQueryInp
 
 
 async def catalog_item_get(client: RastroClient, params: CatalogItemGetInput) -> dict:
-    """Get a single catalog item by ID."""
-    return await client.get_catalog_item(params.catalog_id, params.item_id)
+    """Get a single raw catalog item by ID, including entity_type and parent linkage."""
+    return await client.get_catalog_raw_item(params.catalog_id, params.item_id)
 
 
 async def catalog_item_update(client: RastroClient, params: CatalogItemUpdateInput) -> dict:
@@ -149,11 +151,7 @@ async def catalog_item_update(client: RastroClient, params: CatalogItemUpdateInp
     """
     direct_update_enabled = os.environ.get("RASTRO_MCP_ENABLE_DIRECT_ITEM_UPDATE", "").lower() in {"1", "true", "yes", "on"}
     if not direct_update_enabled:
-        raise ValueError(
-            "catalog_item_update is disabled by default for safety. "
-            "Use catalog_activity_create_transform (activity-first) for edits. "
-            "Set RASTRO_MCP_ENABLE_DIRECT_ITEM_UPDATE=true only for explicit break-glass runs."
-        )
+        raise ValueError("catalog_item_update is disabled by default for safety. " "Use catalog_activity_create_transform (activity-first) for edits. " "Set RASTRO_MCP_ENABLE_DIRECT_ITEM_UPDATE=true only for explicit break-glass runs.")
     return await client.update_catalog_item(params.catalog_id, params.item_id, params.data)
 
 
@@ -257,6 +255,7 @@ async def catalog_activity_create_transform(client: RastroClient, params: Catalo
             staged_changes = data if isinstance(data, list) else [data]
         elif path.endswith(".parquet"):
             import pandas as pd
+
             df = pd.read_parquet(path)
             staged_changes = df.to_dict("records")
     elif params.staged_changes_inline:
@@ -324,9 +323,9 @@ async def catalog_activity_create_transform(client: RastroClient, params: Catalo
     activity_id = created["activity_id"]
 
     # Chunk append to avoid large request-body failures while keeping one activity.
-    stage_batch_size = int(os.environ.get("RASTRO_MCP_STAGE_BATCH_SIZE", "2000"))
+    stage_batch_size = int(os.environ.get("RASTRO_MCP_STAGE_BATCH_SIZE", "500"))
     if stage_batch_size <= 0:
-        stage_batch_size = 2000
+        stage_batch_size = 500
     stage_retries = int(os.environ.get("RASTRO_MCP_STAGE_RETRIES", "3"))
     if stage_retries <= 0:
         stage_retries = 3

@@ -9,7 +9,6 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # Execution tool contracts
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -22,7 +21,7 @@ class SnapshotFormat(str, Enum):
 
 class SnapshotPullInput(BaseModel):
     catalog_id: str
-    output_dir: str = "./snapshots"
+    output_dir: str = "./work/snapshots"
     format: SnapshotFormat = SnapshotFormat.PARQUET
     sample_size: Optional[int] = None
     page_size: int = 400
@@ -159,6 +158,7 @@ class CatalogItemsQueryInput(BaseModel):
     catalog_id: str
     limit: int = 50
     offset: int = 0
+    entity_type: Optional[str] = None
     search: Optional[str] = None
     sort_field: Optional[str] = None
     sort_order: str = "asc"

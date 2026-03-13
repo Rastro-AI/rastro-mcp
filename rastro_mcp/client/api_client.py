@@ -240,11 +240,25 @@ class RastroClient:
             params["sort_order"] = sort_order
         return await self._request("GET", f"/public/catalogs/{catalog_id}/items", params=params)
 
-    async def get_catalog_raw_items(self, catalog_id: str, limit: int = 400, offset: int = 0, entity_type: Optional[str] = None) -> dict:
+    async def get_catalog_raw_items(
+        self,
+        catalog_id: str,
+        limit: int = 400,
+        offset: int = 0,
+        entity_type: Optional[str] = None,
+        search: Optional[str] = None,
+        sort_field: Optional[str] = None,
+        sort_order: str = "asc",
+    ) -> dict:
         """Get raw catalog_items rows (id/entity_type/parent_id/current_version/data)."""
         params: Dict[str, Any] = {"limit": limit, "offset": offset}
         if entity_type:
             params["entity_type"] = entity_type
+        if search:
+            params["search"] = search
+        if sort_field:
+            params["sort_field"] = sort_field
+            params["sort_order"] = sort_order
         return await self._request("GET", f"/public/catalogs/{catalog_id}/raw-items", params=params)
 
     async def get_catalog_items_all(self, catalog_id: str, page_size: int = 400, max_concurrency: Optional[int] = None) -> List[dict]:
@@ -274,6 +288,10 @@ class RastroClient:
     async def get_catalog_item(self, catalog_id: str, item_id: str) -> dict:
         """Get a single catalog item by ID."""
         return await self._request("GET", f"/public/catalogs/{catalog_id}/items/{item_id}")
+
+    async def get_catalog_raw_item(self, catalog_id: str, item_id: str) -> dict:
+        """Get a single raw catalog_items row by ID."""
+        return await self._request("GET", f"/public/catalogs/{catalog_id}/raw-items/{item_id}")
 
     async def update_catalog_item(self, catalog_id: str, item_id: str, data: dict) -> dict:
         """Update a single catalog item's data."""
@@ -307,10 +325,7 @@ class RastroClient:
     ) -> dict:
         """Bulk review staged changes for an activity."""
         if action.lower().startswith("approve"):
-            raise PermissionError(
-                "Programmatic staged-change approvals are disabled in MCP. "
-                "Review and approve in the dashboard."
-            )
+            raise PermissionError("Programmatic staged-change approvals are disabled in MCP. " "Review and approve in the dashboard.")
         payload: Dict[str, Any] = {"action": action}
         if change_ids is not None:
             payload["change_ids"] = change_ids
@@ -320,10 +335,7 @@ class RastroClient:
 
     async def apply_activity(self, activity_id: str) -> dict:
         """Apply approved staged changes for an activity."""
-        raise PermissionError(
-            "Programmatic activity apply is disabled in MCP. "
-            "Review and apply in the dashboard."
-        )
+        raise PermissionError("Programmatic activity apply is disabled in MCP. " "Review and apply in the dashboard.")
 
     # ── Activity endpoints ──────────────────────────────────────────────
 

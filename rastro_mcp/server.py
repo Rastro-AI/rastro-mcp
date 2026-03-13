@@ -25,9 +25,9 @@ from rastro_mcp.models.contracts import (
     BundleValidateInput,
     CatalogActivityCreateTransformInput,
     CatalogActivityGetInput,
-    CatalogActivitySaveWorkflowInput,
     CatalogActivityGetStagedChangesInput,
     CatalogActivityListInput,
+    CatalogActivitySaveWorkflowInput,
     CatalogDeleteInput,
     CatalogDuplicateInput,
     CatalogGetInput,
@@ -48,15 +48,15 @@ from rastro_mcp.models.contracts import (
     ServiceImageStatusInput,
     ServiceJudgeCatalogRowsInput,
     ServiceMapToCatalogSchemaInput,
-    StageDatasetInput,
     SnapshotPullInput,
+    StageDatasetInput,
 )
 from rastro_mcp.tools.catalog_tools import (
     catalog_activity_create_transform,
     catalog_activity_get,
-    catalog_activity_save_workflow,
     catalog_activity_get_staged_changes,
     catalog_activity_list,
+    catalog_activity_save_workflow,
     catalog_delete,
     catalog_duplicate,
     catalog_get,
@@ -73,8 +73,8 @@ from rastro_mcp.tools.catalog_tools import (
 )
 from rastro_mcp.tools.execution_tools import (
     execution_bundle_validate,
-    execution_catalog_stage_dataset,
     execution_catalog_snapshot_pull,
+    execution_catalog_stage_dataset,
     execution_local_diff_compute,
 )
 from rastro_mcp.tools.service_tools import (
@@ -172,13 +172,14 @@ TOOL_DEFINITIONS = [
     },
     {
         "name": "catalog_items_query",
-        "description": "Query catalog items with pagination, text search, and field sorting.",
+        "description": "Query raw catalog rows with pagination, text search, sorting, and product/variant awareness.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "catalog_id": {"type": "string", "description": "Catalog UUID"},
                 "limit": {"type": "integer", "default": 50},
                 "offset": {"type": "integer", "default": 0},
+                "entity_type": {"type": "string", "enum": ["product", "variant"], "description": "Optional entity type filter"},
                 "search": {"type": "string", "description": "Full-text search query"},
                 "sort_field": {"type": "string", "description": "Field to sort by"},
                 "sort_order": {"type": "string", "enum": ["asc", "desc"], "default": "asc"},
@@ -455,7 +456,7 @@ TOOL_DEFINITIONS = [
             "type": "object",
             "properties": {
                 "catalog_id": {"type": "string", "description": "Catalog UUID to snapshot"},
-                "output_dir": {"type": "string", "default": "./snapshots"},
+                "output_dir": {"type": "string", "default": "./work/snapshots"},
                 "format": {"type": "string", "enum": ["parquet", "csv"], "default": "parquet"},
                 "sample_size": {"type": "integer", "description": "Limit rows for sampling (null = all)"},
                 "page_size": {"type": "integer", "default": 400},
@@ -494,7 +495,11 @@ TOOL_DEFINITIONS = [
             "properties": {
                 "before_path": {"type": "string", "description": "Path to before dataset (parquet/csv)"},
                 "after_path": {"type": "string", "description": "Path to after dataset (parquet/csv)"},
-                "key_field": {"type": "string", "default": "__catalog_item_id", "description": "Column used to match rows between datasets. Rows with null key are treated as new inserts. Use a business key (e.g. SKU column) to match by that field instead of database ID."},
+                "key_field": {
+                    "type": "string",
+                    "default": "__catalog_item_id",
+                    "description": "Column used to match rows between datasets. Rows with null key are treated as new inserts. Use a business key (e.g. SKU column) to match by that field instead of database ID.",
+                },
             },
             "required": ["before_path", "after_path"],
         },
@@ -556,10 +561,7 @@ async def dispatch_tool(client: RastroClient, tool_name: str, arguments: Dict[st
         return await catalog_item_get(client, CatalogItemGetInput(**arguments))
     elif tool_name == "catalog_item_update":
         if not DIRECT_ITEM_UPDATE_ENABLED:
-            raise ValueError(
-                "catalog_item_update is disabled by default. "
-                "Use catalog_activity_create_transform for safe staged edits."
-            )
+            raise ValueError("catalog_item_update is disabled by default. " "Use catalog_activity_create_transform for safe staged edits.")
         return await catalog_item_update(client, CatalogItemUpdateInput(**arguments))
     elif tool_name == "catalog_activity_list":
         return await catalog_activity_list(client, CatalogActivityListInput(**arguments))
@@ -626,10 +628,7 @@ def _load_master_prompt() -> str:
         with open(prompt_path) as f:
             return f.read()
     except FileNotFoundError:
-        return (
-            "You are a Rastro catalog transform agent. "
-            "Use catalog/service/execution tools, show diffs, and route final apply through dashboard review."
-        )
+        return "You are a Rastro catalog transform agent. " "Use catalog/service/execution tools, show diffs, and route final apply through dashboard review."
 
 
 MASTER_PROMPT = _load_master_prompt()

@@ -8,6 +8,7 @@ Outputs a staged_changes JSONL file compatible with the Rastro activity staged c
 import json
 import os
 from typing import Any, Dict, List, Optional, Tuple
+from uuid import uuid4
 
 import pandas as pd
 
@@ -73,6 +74,27 @@ def _row_to_dict(row: pd.Series) -> Dict[str, Any]:
     return d
 
 
+def _write_staged_changes(staged_changes: List[Dict[str, Any]], after_path: str) -> str:
+    """Write staged changes beside the after dataset, with a workspace-local fallback."""
+    preferred_dir = os.path.dirname(after_path) or "."
+    preferred_path = os.path.join(preferred_dir, "staged_changes.jsonl")
+
+    def _write(path: str) -> None:
+        with open(path, "w") as f:
+            for change in staged_changes:
+                f.write(json.dumps(change, default=str) + "\n")
+
+    try:
+        _write(preferred_path)
+        return preferred_path
+    except OSError:
+        fallback_dir = resolve_workspace_path("./work/staged_changes", label="staged_changes_output_dir")
+        os.makedirs(fallback_dir, exist_ok=True)
+        fallback_path = os.path.join(fallback_dir, f"staged_changes_{uuid4().hex}.jsonl")
+        _write(fallback_path)
+        return fallback_path
+
+
 SYSTEM_COLUMNS = {"__catalog_item_id", "__entity_type", "__parent_id", "__current_version"}
 
 
@@ -133,15 +155,17 @@ async def diff_compute(params: DiffComputeInput) -> DiffComputeOutput:
         item_data = {k: v for k, v in after_data.items() if k not in SYSTEM_COLUMNS}
         entity_type = after_data.get("__entity_type")
 
-        staged_changes.append({
-            "catalog_item_id": None,
-            "catalog_item_entity_type": entity_type,
-            "before_data": None,
-            "after_data": item_data,
-            "source_data": item_data,
-            "is_new_item": True,
-            "row_index": row_index,
-        })
+        staged_changes.append(
+            {
+                "catalog_item_id": None,
+                "catalog_item_entity_type": entity_type,
+                "before_data": None,
+                "after_data": item_data,
+                "source_data": item_data,
+                "is_new_item": True,
+                "row_index": row_index,
+            }
+        )
         row_index += 1
 
     # Added rows with null key (new inserts that don't yet have catalog IDs)
@@ -150,15 +174,17 @@ async def diff_compute(params: DiffComputeInput) -> DiffComputeOutput:
         item_data = {k: v for k, v in after_data.items() if k not in SYSTEM_COLUMNS}
         entity_type = after_data.get("__entity_type")
 
-        staged_changes.append({
-            "catalog_item_id": None,
-            "catalog_item_entity_type": entity_type,
-            "before_data": None,
-            "after_data": item_data,
-            "source_data": item_data,
-            "is_new_item": True,
-            "row_index": row_index,
-        })
+        staged_changes.append(
+            {
+                "catalog_item_id": None,
+                "catalog_item_entity_type": entity_type,
+                "before_data": None,
+                "after_data": item_data,
+                "source_data": item_data,
+                "is_new_item": True,
+                "row_index": row_index,
+            }
+        )
         row_index += 1
 
     # Removed rows — staged as deletion entries (before_data set, after_data is empty)
@@ -169,16 +195,18 @@ async def diff_compute(params: DiffComputeInput) -> DiffComputeOutput:
         entity_type = before_data.get("__entity_type")
         before_item = {k: v for k, v in before_data.items() if k not in SYSTEM_COLUMNS}
 
-        staged_changes.append({
-            "catalog_item_id": item_id,
-            "catalog_item_entity_type": entity_type,
-            "before_data": before_item,
-            "after_data": {},
-            "source_data": None,
-            "is_new_item": False,
-            "is_delete": True,
-            "row_index": row_index,
-        })
+        staged_changes.append(
+            {
+                "catalog_item_id": item_id,
+                "catalog_item_entity_type": entity_type,
+                "before_data": before_item,
+                "after_data": {},
+                "source_data": None,
+                "is_new_item": False,
+                "is_delete": True,
+                "row_index": row_index,
+            }
+        )
         row_index += 1
 
     # Modified rows
@@ -202,18 +230,25 @@ async def diff_compute(params: DiffComputeInput) -> DiffComputeOutput:
             modified_count += 1
             item_id = before_data.get("__catalog_item_id")
             entity_type = before_data.get("__entity_type")
-            before_item = {k: v for k, v in before_data.items() if k not in SYSTEM_COLUMNS}
-            after_item = {k: v for k, v in after_data.items() if k not in SYSTEM_COLUMNS}
+            before_item = {}
+            after_item = {}
+            for field, (before_value, after_value) in changed_fields.items():
+                if before_value is not None:
+                    before_item[field] = before_value
+                if after_value is not None:
+                    after_item[field] = after_value
 
-            staged_changes.append({
-                "catalog_item_id": item_id,
-                "catalog_item_entity_type": entity_type,
-                "before_data": before_item,
-                "after_data": after_item,
-                "source_data": None,
-                "is_new_item": False,
-                "row_index": row_index,
-            })
+            staged_changes.append(
+                {
+                    "catalog_item_id": item_id,
+                    "catalog_item_entity_type": entity_type,
+                    "before_data": before_item,
+                    "after_data": after_item,
+                    "source_data": None,
+                    "is_new_item": False,
+                    "row_index": row_index,
+                }
+            )
             row_index += 1
 
             # Collect sample changes (up to 10)
@@ -221,12 +256,7 @@ async def diff_compute(params: DiffComputeInput) -> DiffComputeOutput:
                 for field, (bv, av) in list(changed_fields.items())[:2]:
                     sample_changes.append(SampleChange(key=key, field=field, before=bv, after=av))
 
-    # Write staged changes to JSONL
-    work_dir = os.path.dirname(after_path) or "."
-    staged_path = os.path.join(work_dir, "staged_changes.jsonl")
-    with open(staged_path, "w") as f:
-        for change in staged_changes:
-            f.write(json.dumps(change, default=str) + "\n")
+    staged_path = _write_staged_changes(staged_changes, after_path)
 
     diff_summary = DiffSummary(
         rows_before=len(before_df),

@@ -1,9 +1,20 @@
 name: Publish
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - "pyproject.toml"
+      - "rastro_mcp/**"
+      - "README.md"
+      - "LICENSE"
   release:
     types: [published]
   workflow_dispatch:
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   pypi:
@@ -18,7 +29,55 @@ jobs:
         uses: astral-sh/setup-uv@v3
       - name: Setup Python
         run: uv python install 3.11
+      - name: Read package metadata
+        id: package
+        run: |
+          python <<'PY'
+          import os
+          import tomllib
+          from pathlib import Path
+
+          data = tomllib.loads(Path("pyproject.toml").read_text())
+          project = data["project"]
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"name={project['name']}\n")
+              handle.write(f"version={project['version']}\n")
+          PY
+      - name: Check PyPI for current version
+        id: pypi
+        env:
+          PACKAGE_NAME: ${{ steps.package.outputs.name }}
+          PACKAGE_VERSION: ${{ steps.package.outputs.version }}
+        run: |
+          python <<'PY'
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+
+          package_name = os.environ["PACKAGE_NAME"]
+          package_version = os.environ["PACKAGE_VERSION"]
+          already_published = False
+          url = f"https://pypi.org/pypi/{package_name}/json"
+
+          try:
+              with urllib.request.urlopen(url, timeout=20) as response:
+                  data = json.load(response)
+              already_published = package_version in data.get("releases", {})
+          except urllib.error.HTTPError as exc:
+              if exc.code != 404:
+                  raise
+
+          print(f"Publish decision for {package_name} {package_version}: {'skip' if already_published else 'publish'}")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as handle:
+              handle.write(f"already_published={'true' if already_published else 'false'}\n")
+          PY
+      - name: Skip already-published version
+        if: steps.pypi.outputs.already_published == 'true'
+        run: echo "Package ${{ steps.package.outputs.name }} ${{ steps.package.outputs.version }} is already on PyPI; skipping publish."
       - name: Build package
+        if: steps.pypi.outputs.already_published != 'true'
         run: uv build
       - name: Publish to PyPI
+        if: steps.pypi.outputs.already_published != 'true'
         uses: pypa/gh-action-pypi-publish@release/v1

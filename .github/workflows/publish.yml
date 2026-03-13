@@ -1,13 +1,6 @@
 name: Publish
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "pyproject.toml"
-      - "rastro_mcp/**"
-      - "README.md"
-      - "LICENSE"
   release:
     types: [published]
   workflow_dispatch:

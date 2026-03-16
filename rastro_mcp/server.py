@@ -31,6 +31,7 @@ from rastro_mcp.models.contracts import (
     CatalogDeleteInput,
     CatalogDuplicateInput,
     CatalogGetInput,
+    CatalogGetMdInput,
     CatalogItemGetInput,
     CatalogItemsQueryInput,
     CatalogItemUpdateInput,
@@ -40,6 +41,7 @@ from rastro_mcp.models.contracts import (
     CatalogSnapshotListInput,
     CatalogSnapshotRestoreInput,
     CatalogTaxonomyGetInput,
+    CatalogUpdateMdInput,
     CatalogUpdateQualityPromptInput,
     CatalogVisualizeLocalInput,
     DiffComputeInput,
@@ -60,6 +62,7 @@ from rastro_mcp.tools.catalog_tools import (
     catalog_delete,
     catalog_duplicate,
     catalog_get,
+    catalog_get_md,
     catalog_item_get,
     catalog_item_update,
     catalog_items_query,
@@ -69,6 +72,7 @@ from rastro_mcp.tools.catalog_tools import (
     catalog_snapshot_list,
     catalog_snapshot_restore,
     catalog_taxonomy_get,
+    catalog_update_md,
     catalog_update_quality_prompt,
 )
 from rastro_mcp.tools.execution_tools import (
@@ -168,6 +172,29 @@ TOOL_DEFINITIONS = [
                 "prompt": {"type": "string", "description": "Quality prompt text — criteria for judging rows"},
             },
             "required": ["catalog_id", "prompt"],
+        },
+    },
+    {
+        "name": "catalog_update_md",
+        "description": "Set the catalog's markdown context (catalog_md). This text is auto-injected into enrichment and mapping prompts. Pass the full markdown to replace.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "catalog_id": {"type": "string", "description": "Catalog UUID"},
+                "catalog_md": {"type": "string", "description": "Markdown context to inject into prompts"},
+            },
+            "required": ["catalog_id", "catalog_md"],
+        },
+    },
+    {
+        "name": "catalog_get_md",
+        "description": "Get the catalog's markdown context (catalog_md).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "catalog_id": {"type": "string", "description": "Catalog UUID"},
+            },
+            "required": ["catalog_id"],
         },
     },
     {
@@ -555,6 +582,10 @@ async def dispatch_tool(client: RastroClient, tool_name: str, arguments: Dict[st
         return await catalog_taxonomy_get(client, CatalogTaxonomyGetInput(**arguments))
     elif tool_name == "catalog_update_quality_prompt":
         return await catalog_update_quality_prompt(client, CatalogUpdateQualityPromptInput(**arguments))
+    elif tool_name == "catalog_update_md":
+        return await catalog_update_md(client, CatalogUpdateMdInput(**arguments))
+    elif tool_name == "catalog_get_md":
+        return await catalog_get_md(client, CatalogGetMdInput(**arguments))
     elif tool_name == "catalog_items_query":
         return await catalog_items_query(client, CatalogItemsQueryInput(**arguments))
     elif tool_name == "catalog_item_get":

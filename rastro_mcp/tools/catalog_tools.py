@@ -41,6 +41,7 @@ from rastro_mcp.models.contracts import (
     CatalogDeleteInput,
     CatalogDuplicateInput,
     CatalogGetInput,
+    CatalogGetMdInput,
     CatalogItemGetInput,
     CatalogItemsQueryInput,
     CatalogItemUpdateInput,
@@ -50,6 +51,7 @@ from rastro_mcp.models.contracts import (
     CatalogSnapshotListInput,
     CatalogSnapshotRestoreInput,
     CatalogTaxonomyGetInput,
+    CatalogUpdateMdInput,
     CatalogUpdateQualityPromptInput,
     CreateTransformOutput,
     ValidationRules,
@@ -123,6 +125,16 @@ async def catalog_taxonomy_get(client: RastroClient, params: CatalogTaxonomyGetI
 async def catalog_update_quality_prompt(client: RastroClient, params: CatalogUpdateQualityPromptInput) -> dict:
     """Update the catalog's quality prompt used for judging and readiness checks."""
     return await client.update_catalog_quality_prompt(params.catalog_id, params.prompt)
+
+
+async def catalog_update_md(client: RastroClient, params: CatalogUpdateMdInput) -> dict:
+    """Update the catalog's markdown context (catalog_md) injected into enrichment and mapping prompts."""
+    return await client.update_catalog_md(params.catalog_id, params.catalog_md)
+
+
+async def catalog_get_md(client: RastroClient, params: CatalogGetMdInput) -> dict:
+    """Get the catalog's markdown context (catalog_md)."""
+    return await client.get_catalog_md(params.catalog_id)
 
 
 async def catalog_items_query(client: RastroClient, params: CatalogItemsQueryInput) -> dict:

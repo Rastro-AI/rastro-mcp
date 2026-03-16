@@ -317,6 +317,15 @@ class CatalogUpdateQualityPromptInput(BaseModel):
     prompt: str
 
 
+class CatalogUpdateMdInput(BaseModel):
+    catalog_id: str
+    catalog_md: str
+
+
+class CatalogGetMdInput(BaseModel):
+    catalog_id: str
+
+
 class ServiceMapToCatalogSchemaInput(BaseModel):
     catalog_id: str
     items: List[Dict[str, Any]]

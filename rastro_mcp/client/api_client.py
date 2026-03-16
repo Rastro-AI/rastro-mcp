@@ -445,5 +445,11 @@ class RastroClient:
     async def update_catalog_quality_prompt(self, catalog_id: str, prompt: str) -> dict:
         return await self._request("PUT", f"/public/catalogs/{catalog_id}/quality-prompt", json={"prompt": prompt})
 
+    async def update_catalog_md(self, catalog_id: str, catalog_md: str) -> dict:
+        return await self._request("PUT", f"/public/catalogs/{catalog_id}/catalog-md", json={"catalog_md": catalog_md})
+
+    async def get_catalog_md(self, catalog_id: str) -> dict:
+        return await self._request("GET", f"/public/catalogs/{catalog_id}/catalog-md")
+
     async def get_enrich_job(self, job_id: str) -> dict:
         return await self._request("GET", f"/public/enrich/{job_id}")

@@ -52,7 +52,18 @@ class RastroClient:
     async def __aexit__(self, exc_type, exc, tb):
         await self.close()
 
+    def _headers_for_org(self, organization_id: Optional[str] = None) -> dict:
+        """Return extra headers to override the org for a single request."""
+        if organization_id and organization_id != self.auth.organization_id:
+            return {"X-Organization-Id": organization_id}
+        return {}
+
     async def _request(self, method: str, path: str, **kwargs) -> dict:
+        # Allow per-request org override via _org_id kwarg
+        org_id = kwargs.pop("_org_id", None)
+        if org_id:
+            extra = self._headers_for_org(org_id)
+            kwargs["headers"] = {**kwargs.get("headers", {}), **extra}
         client = await self._get_client()
         resp = await client.request(method, path, **kwargs)
         if resp.status_code >= 400:
@@ -216,11 +227,11 @@ class RastroClient:
 
     # ── Catalog endpoints ──────────────────────────────────────────────
 
-    async def list_catalogs(self, limit: int = 50, offset: int = 0) -> dict:
-        return await self._request("GET", "/public/catalogs", params={"limit": limit, "offset": offset})
+    async def list_catalogs(self, limit: int = 50, offset: int = 0, organization_id: Optional[str] = None) -> dict:
+        return await self._request("GET", "/public/catalogs", params={"limit": limit, "offset": offset}, _org_id=organization_id)
 
-    async def get_catalog(self, catalog_id: str) -> dict:
-        return await self._request("GET", f"/public/catalogs/{catalog_id}")
+    async def get_catalog(self, catalog_id: str, organization_id: Optional[str] = None) -> dict:
+        return await self._request("GET", f"/public/catalogs/{catalog_id}", _org_id=organization_id)
 
     async def get_catalog_schema(self, catalog_id: str, version: Optional[str] = None) -> dict:
         params = {}
@@ -293,9 +304,13 @@ class RastroClient:
         """Get a single raw catalog_items row by ID."""
         return await self._request("GET", f"/public/catalogs/{catalog_id}/raw-items/{item_id}")
 
-    async def update_catalog_item(self, catalog_id: str, item_id: str, data: dict) -> dict:
+    async def update_catalog_item(self, catalog_id: str, item_id: str, data: dict, organization_id: Optional[str] = None) -> dict:
         """Update a single catalog item's data."""
-        return await self._request("PUT", f"/public/catalogs/{catalog_id}/items/{item_id}", json=data)
+        return await self._request("PUT", f"/public/catalogs/{catalog_id}/items/{item_id}", json=data, _org_id=organization_id)
+
+    async def bulk_upsert_catalog_items(self, catalog_id: str, items: list, organization_id: Optional[str] = None) -> dict:
+        """Bulk upsert catalog items. Each item dict should contain field updates keyed by __catalog_item_id or the catalog's unique_id_field."""
+        return await self._request("POST", f"/public/catalogs/{catalog_id}/items/bulk", json={"items": items}, _org_id=organization_id)
 
     async def get_staged_changes(self, activity_id: str, limit: int = 50, offset: int = 0) -> dict:
         """Get staged changes for an activity.

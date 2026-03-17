@@ -1,6 +1,6 @@
 [project]
 name = "rastro.ai"
-version = "0.3.2"
+version = "0.3.3"
 description = "MCP server for Rastro catalog operations — 26 tools for schema, items, activities, snapshots, AI mapping, judging, and image editing"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"

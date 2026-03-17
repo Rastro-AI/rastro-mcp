@@ -43,6 +43,7 @@ from rastro_mcp.models.contracts import (
     CatalogGetInput,
     CatalogGetMdInput,
     CatalogItemGetInput,
+    CatalogItemsBulkUpdateInput,
     CatalogItemsQueryInput,
     CatalogItemUpdateInput,
     CatalogListInput,
@@ -74,12 +75,12 @@ def _should_open_review_url(url: str) -> bool:
 
 async def catalog_list(client: RastroClient, params: CatalogListInput) -> dict:
     """List all catalogs for the authenticated organization."""
-    return await client.list_catalogs(limit=params.limit, offset=params.offset)
+    return await client.list_catalogs(limit=params.limit, offset=params.offset, organization_id=params.organization_id)
 
 
 async def catalog_get(client: RastroClient, params: CatalogGetInput) -> dict:
     """Get a single catalog by ID."""
-    return await client.get_catalog(params.catalog_id)
+    return await client.get_catalog(params.catalog_id, organization_id=params.organization_id)
 
 
 async def catalog_delete(client: RastroClient, params: CatalogDeleteInput) -> dict:
@@ -164,7 +165,12 @@ async def catalog_item_update(client: RastroClient, params: CatalogItemUpdateInp
     direct_update_enabled = os.environ.get("RASTRO_MCP_ENABLE_DIRECT_ITEM_UPDATE", "").lower() in {"1", "true", "yes", "on"}
     if not direct_update_enabled:
         raise ValueError("catalog_item_update is disabled by default for safety. " "Use catalog_activity_create_transform (activity-first) for edits. " "Set RASTRO_MCP_ENABLE_DIRECT_ITEM_UPDATE=true only for explicit break-glass runs.")
-    return await client.update_catalog_item(params.catalog_id, params.item_id, params.data)
+    return await client.update_catalog_item(params.catalog_id, params.item_id, params.data, organization_id=params.organization_id)
+
+
+async def catalog_items_bulk_update(client: RastroClient, params: CatalogItemsBulkUpdateInput) -> dict:
+    """Bulk upsert catalog items. Each item should include __catalog_item_id (database UUID) for updates, plus the fields to change."""
+    return await client.bulk_upsert_catalog_items(params.catalog_id, params.items, organization_id=params.organization_id)
 
 
 async def catalog_activity_list(client: RastroClient, params: CatalogActivityListInput) -> dict:

@@ -33,6 +33,7 @@ from rastro_mcp.models.contracts import (
     CatalogGetInput,
     CatalogGetMdInput,
     CatalogItemGetInput,
+    CatalogItemsBulkUpdateInput,
     CatalogItemsQueryInput,
     CatalogItemUpdateInput,
     CatalogListInput,
@@ -65,6 +66,7 @@ from rastro_mcp.tools.catalog_tools import (
     catalog_get_md,
     catalog_item_get,
     catalog_item_update,
+    catalog_items_bulk_update,
     catalog_items_query,
     catalog_list,
     catalog_schema_get,
@@ -111,6 +113,7 @@ TOOL_DEFINITIONS = [
             "properties": {
                 "limit": {"type": "integer", "default": 50, "description": "Max results to return"},
                 "offset": {"type": "integer", "default": 0, "description": "Offset for pagination"},
+                "organization_id": {"type": "string", "description": "Override organization UUID (requires API key creator to be a member of this org)"},
             },
         },
     },
@@ -121,6 +124,7 @@ TOOL_DEFINITIONS = [
             "type": "object",
             "properties": {
                 "catalog_id": {"type": "string", "description": "Catalog UUID"},
+                "organization_id": {"type": "string", "description": "Override organization UUID (requires API key creator to be a member of this org)"},
             },
             "required": ["catalog_id"],
         },
@@ -210,8 +214,22 @@ TOOL_DEFINITIONS = [
                 "search": {"type": "string", "description": "Full-text search query"},
                 "sort_field": {"type": "string", "description": "Field to sort by"},
                 "sort_order": {"type": "string", "enum": ["asc", "desc"], "default": "asc"},
+                "organization_id": {"type": "string", "description": "Override organization UUID"},
             },
             "required": ["catalog_id"],
+        },
+    },
+    {
+        "name": "catalog_items_bulk_update",
+        "description": "Bulk upsert catalog items. Each item dict should include __catalog_item_id (database UUID) for updates, plus the fields to set/update. Returns summary with items_processed/created/updated/failed counts.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "catalog_id": {"type": "string", "description": "Catalog UUID"},
+                "items": {"type": "array", "items": {"type": "object"}, "description": "Array of item dicts with __catalog_item_id + fields to update"},
+                "organization_id": {"type": "string", "description": "Override organization UUID"},
+            },
+            "required": ["catalog_id", "items"],
         },
     },
     {
@@ -594,6 +612,8 @@ async def dispatch_tool(client: RastroClient, tool_name: str, arguments: Dict[st
         if not DIRECT_ITEM_UPDATE_ENABLED:
             raise ValueError("catalog_item_update is disabled by default. " "Use catalog_activity_create_transform for safe staged edits.")
         return await catalog_item_update(client, CatalogItemUpdateInput(**arguments))
+    elif tool_name == "catalog_items_bulk_update":
+        return await catalog_items_bulk_update(client, CatalogItemsBulkUpdateInput(**arguments))
     elif tool_name == "catalog_activity_list":
         return await catalog_activity_list(client, CatalogActivityListInput(**arguments))
     elif tool_name == "catalog_activity_get":

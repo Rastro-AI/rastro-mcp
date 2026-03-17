@@ -139,19 +139,23 @@ class BundleValidateOutput(BaseModel):
 class CatalogListInput(BaseModel):
     limit: int = 50
     offset: int = 0
+    organization_id: Optional[str] = None
 
 
 class CatalogGetInput(BaseModel):
     catalog_id: str
+    organization_id: Optional[str] = None
 
 
 class CatalogSchemaGetInput(BaseModel):
     catalog_id: str
     version: Optional[str] = None
+    organization_id: Optional[str] = None
 
 
 class CatalogTaxonomyGetInput(BaseModel):
     catalog_id: str
+    organization_id: Optional[str] = None
 
 
 class CatalogItemsQueryInput(BaseModel):
@@ -162,6 +166,7 @@ class CatalogItemsQueryInput(BaseModel):
     search: Optional[str] = None
     sort_field: Optional[str] = None
     sort_order: str = "asc"
+    organization_id: Optional[str] = None
 
 
 class CatalogActivityListInput(BaseModel):
@@ -170,6 +175,7 @@ class CatalogActivityListInput(BaseModel):
     activity_type: Optional[str] = None
     limit: int = 20
     offset: int = 0
+    organization_id: Optional[str] = None
 
 
 class CatalogActivityGetInput(BaseModel):
@@ -179,12 +185,20 @@ class CatalogActivityGetInput(BaseModel):
 class CatalogItemGetInput(BaseModel):
     catalog_id: str
     item_id: str
+    organization_id: Optional[str] = None
 
 
 class CatalogItemUpdateInput(BaseModel):
     catalog_id: str
     item_id: str
     data: Dict[str, Any]
+    organization_id: Optional[str] = None
+
+
+class CatalogItemsBulkUpdateInput(BaseModel):
+    catalog_id: str
+    items: List[Dict[str, Any]]
+    organization_id: Optional[str] = None
 
 
 class CatalogActivityGetStagedChangesInput(BaseModel):

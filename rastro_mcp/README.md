@@ -20,10 +20,12 @@ uv sync
 
 ## Required Environment
 ```bash
-export RASTRO_API_KEY=rastro_pk_...        # Required
+export RASTRO_AUTH_TOKEN=<bearer-token>                # Preferred: user token or API key
+# export RASTRO_USER_TOKEN=<user-jwt>                  # Equivalent user-token alias
+# export RASTRO_API_KEY=rastro_pk_...                  # API-key alias
 export RASTRO_BASE_URL=https://catalogapi.rastro.ai/api  # Production (default)
 # export RASTRO_BASE_URL=http://127.0.0.1:8000/api       # Local dev
-# export RASTRO_ORGANIZATION_ID=<uuid>                    # Optional, derived from key
+# export RASTRO_ORGANIZATION_ID=<uuid>                    # Recommended for user tokens; picks the target org
 ```
 
 ## Run
@@ -46,7 +48,8 @@ Add to `.mcp.json` or `claude_desktop_config.json`:
       "command": "uv",
       "args": ["run", "python", "-m", "rastro_mcp.server"],
       "env": {
-        "RASTRO_API_KEY": "rastro_pk_...",
+        "RASTRO_AUTH_TOKEN": "<bearer-token>",
+        "RASTRO_ORGANIZATION_ID": "<org-uuid>",
         "RASTRO_BASE_URL": "https://catalogapi.rastro.ai/api"
       }
     }
@@ -399,9 +402,11 @@ Single unified prompt guiding the agent through catalog operations, product-vari
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `RASTRO_API_KEY` | (required) | API key (`rastro_pk_*` prefix) |
+| `RASTRO_AUTH_TOKEN` | optional | Preferred bearer token env var. Supports user JWTs and API keys. |
+| `RASTRO_USER_TOKEN` | optional | User JWT alias for `RASTRO_AUTH_TOKEN`. |
+| `RASTRO_API_KEY` | optional | API key alias for `RASTRO_AUTH_TOKEN`. |
 | `RASTRO_BASE_URL` | `https://api.rastro.ai/api` | API base URL |
-| `RASTRO_ORGANIZATION_ID` | (from key) | Organization UUID override |
+| `RASTRO_ORGANIZATION_ID` | optional | Organization UUID override. Recommended when using a user token. |
 | `RASTRO_MCP_ENABLE_DIRECT_ITEM_UPDATE` | `false` | Enable direct item PUT |
 | `RASTRO_MCP_STAGE_BATCH_SIZE` | `2000` | Chunk size for staging large activities |
 | `RASTRO_MCP_STAGE_RETRIES` | `3` | Retry count for staging chunks |

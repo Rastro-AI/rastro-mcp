@@ -115,6 +115,7 @@ class RastroClient:
         page_size: int,
         params_extra: Optional[Dict[str, Any]] = None,
         expected_total: Optional[int] = None,
+        organization_id: Optional[str] = None,
     ) -> List[dict]:
         """Reliable fallback pagination using offset += len(items)."""
         params_extra = params_extra or {}
@@ -125,7 +126,7 @@ class RastroClient:
 
         while True:
             params: Dict[str, Any] = {"limit": requested, "offset": offset, **params_extra}
-            resp = await self._request_with_retry("GET", path, params=params)
+            resp = await self._request_with_retry("GET", path, params=params, _org_id=organization_id)
             items = resp.get("items", []) or []
             if not items:
                 break
@@ -157,6 +158,7 @@ class RastroClient:
         page_size: int,
         params_extra: Optional[Dict[str, Any]] = None,
         max_concurrency: Optional[int] = None,
+        organization_id: Optional[str] = None,
     ) -> List[dict]:
         """Fast pagination when total is known and offset works correctly."""
         params_extra = params_extra or {}
@@ -164,14 +166,24 @@ class RastroClient:
         concurrency = max(1, int(max_concurrency or os.environ.get("RASTRO_MCP_PULL_MAX_CONCURRENCY", "8")))
         page_timeout_seconds = max(5.0, float(os.environ.get("RASTRO_MCP_PULL_PAGE_TIMEOUT_SECONDS", "25")))
 
-        first_resp = await self._request_with_retry("GET", path, params={"limit": requested, "offset": 0, **params_extra})
+        first_resp = await self._request_with_retry(
+            "GET",
+            path,
+            params={"limit": requested, "offset": 0, **params_extra},
+            _org_id=organization_id,
+        )
         first_items = first_resp.get("items", []) or []
         if not first_items:
             return []
 
         total = self._parse_int(first_resp.get("total"))
         if total is None:
-            return await self._paginate_items_sequential(path=path, page_size=requested, params_extra=params_extra)
+            return await self._paginate_items_sequential(
+                path=path,
+                page_size=requested,
+                params_extra=params_extra,
+                organization_id=organization_id,
+            )
 
         if total <= len(first_items):
             return first_items[:total]
@@ -185,7 +197,7 @@ class RastroClient:
             params = {"limit": requested, "offset": offset, **params_extra}
             async with sem:
                 resp = await asyncio.wait_for(
-                    self._request_with_retry("GET", path, params=params),
+                    self._request_with_retry("GET", path, params=params, _org_id=organization_id),
                     timeout=page_timeout_seconds,
                 )
             return offset, (resp.get("items", []) or [])
@@ -199,6 +211,7 @@ class RastroClient:
                 page_size=fallback_page_size,
                 params_extra=params_extra,
                 expected_total=total,
+                organization_id=organization_id,
             )
 
         # Detect offset-ignored deployments; fallback to safe sequential pagination.
@@ -214,14 +227,26 @@ class RastroClient:
                 if page_first_id == first_id:
                     repeated_first_id += 1
             if non_empty > 0 and repeated_first_id == non_empty:
-                return await self._paginate_items_sequential(path=path, page_size=requested, params_extra=params_extra, expected_total=total)
+                return await self._paginate_items_sequential(
+                    path=path,
+                    page_size=requested,
+                    params_extra=params_extra,
+                    expected_total=total,
+                    organization_id=organization_id,
+                )
 
         all_items = list(first_items)
         for _, page_items in sorted(pages, key=lambda p: p[0]):
             all_items.extend(page_items)
 
         if len(all_items) < total:
-            return await self._paginate_items_sequential(path=path, page_size=requested, params_extra=params_extra, expected_total=total)
+            return await self._paginate_items_sequential(
+                path=path,
+                page_size=requested,
+                params_extra=params_extra,
+                expected_total=total,
+                organization_id=organization_id,
+            )
 
         return all_items[:total]
 
@@ -233,23 +258,32 @@ class RastroClient:
     async def get_catalog(self, catalog_id: str, organization_id: Optional[str] = None) -> dict:
         return await self._request("GET", f"/public/catalogs/{catalog_id}", _org_id=organization_id)
 
-    async def get_catalog_schema(self, catalog_id: str, version: Optional[str] = None) -> dict:
+    async def get_catalog_schema(self, catalog_id: str, version: Optional[str] = None, organization_id: Optional[str] = None) -> dict:
         params = {}
         if version:
             params["version"] = version
-        return await self._request("GET", f"/public/catalogs/{catalog_id}/schema", params=params)
+        return await self._request("GET", f"/public/catalogs/{catalog_id}/schema", params=params, _org_id=organization_id)
 
-    async def get_catalog_taxonomy(self, catalog_id: str) -> dict:
-        return await self._request("GET", f"/public/catalogs/{catalog_id}/taxonomy")
+    async def get_catalog_taxonomy(self, catalog_id: str, organization_id: Optional[str] = None) -> dict:
+        return await self._request("GET", f"/public/catalogs/{catalog_id}/taxonomy", _org_id=organization_id)
 
-    async def get_catalog_items(self, catalog_id: str, limit: int = 50, offset: int = 0, search: Optional[str] = None, sort_field: Optional[str] = None, sort_order: str = "asc") -> dict:
+    async def get_catalog_items(
+        self,
+        catalog_id: str,
+        limit: int = 50,
+        offset: int = 0,
+        search: Optional[str] = None,
+        sort_field: Optional[str] = None,
+        sort_order: str = "asc",
+        organization_id: Optional[str] = None,
+    ) -> dict:
         params: Dict[str, Any] = {"limit": limit, "offset": offset}
         if search:
             params["search"] = search
         if sort_field:
             params["sort_field"] = sort_field
             params["sort_order"] = sort_order
-        return await self._request("GET", f"/public/catalogs/{catalog_id}/items", params=params)
+        return await self._request("GET", f"/public/catalogs/{catalog_id}/items", params=params, _org_id=organization_id)
 
     async def get_catalog_raw_items(
         self,
@@ -260,6 +294,7 @@ class RastroClient:
         search: Optional[str] = None,
         sort_field: Optional[str] = None,
         sort_order: str = "asc",
+        organization_id: Optional[str] = None,
     ) -> dict:
         """Get raw catalog_items rows (id/entity_type/parent_id/current_version/data)."""
         params: Dict[str, Any] = {"limit": limit, "offset": offset}
@@ -270,12 +305,23 @@ class RastroClient:
         if sort_field:
             params["sort_field"] = sort_field
             params["sort_order"] = sort_order
-        return await self._request("GET", f"/public/catalogs/{catalog_id}/raw-items", params=params)
+        return await self._request("GET", f"/public/catalogs/{catalog_id}/raw-items", params=params, _org_id=organization_id)
 
-    async def get_catalog_items_all(self, catalog_id: str, page_size: int = 400, max_concurrency: Optional[int] = None) -> List[dict]:
+    async def get_catalog_items_all(
+        self,
+        catalog_id: str,
+        page_size: int = 400,
+        max_concurrency: Optional[int] = None,
+        organization_id: Optional[str] = None,
+    ) -> List[dict]:
         """Get all public catalog items using fast parallel pagination with safe fallback."""
         path = f"/public/catalogs/{catalog_id}/items"
-        return await self._paginate_items_parallel(path=path, page_size=page_size, max_concurrency=max_concurrency)
+        return await self._paginate_items_parallel(
+            path=path,
+            page_size=page_size,
+            max_concurrency=max_concurrency,
+            organization_id=organization_id,
+        )
 
     async def get_catalog_raw_items_all(
         self,
@@ -283,6 +329,7 @@ class RastroClient:
         page_size: int = 400,
         entity_type: Optional[str] = None,
         max_concurrency: Optional[int] = None,
+        organization_id: Optional[str] = None,
     ) -> List[dict]:
         """Get all raw catalog_items rows using fast parallel pagination with safe fallback."""
         path = f"/public/catalogs/{catalog_id}/raw-items"
@@ -294,15 +341,16 @@ class RastroClient:
             page_size=page_size,
             params_extra=params_extra,
             max_concurrency=max_concurrency,
+            organization_id=organization_id,
         )
 
-    async def get_catalog_item(self, catalog_id: str, item_id: str) -> dict:
+    async def get_catalog_item(self, catalog_id: str, item_id: str, organization_id: Optional[str] = None) -> dict:
         """Get a single catalog item by ID."""
-        return await self._request("GET", f"/public/catalogs/{catalog_id}/items/{item_id}")
+        return await self._request("GET", f"/public/catalogs/{catalog_id}/items/{item_id}", _org_id=organization_id)
 
-    async def get_catalog_raw_item(self, catalog_id: str, item_id: str) -> dict:
+    async def get_catalog_raw_item(self, catalog_id: str, item_id: str, organization_id: Optional[str] = None) -> dict:
         """Get a single raw catalog_items row by ID."""
-        return await self._request("GET", f"/public/catalogs/{catalog_id}/raw-items/{item_id}")
+        return await self._request("GET", f"/public/catalogs/{catalog_id}/raw-items/{item_id}", _org_id=organization_id)
 
     async def update_catalog_item(self, catalog_id: str, item_id: str, data: dict, organization_id: Optional[str] = None) -> dict:
         """Update a single catalog item's data."""
@@ -312,7 +360,7 @@ class RastroClient:
         """Bulk upsert catalog items. Each item dict should contain field updates keyed by __catalog_item_id or the catalog's unique_id_field."""
         return await self._request("POST", f"/public/catalogs/{catalog_id}/items/bulk", json={"items": items}, _org_id=organization_id)
 
-    async def get_staged_changes(self, activity_id: str, limit: int = 50, offset: int = 0) -> dict:
+    async def get_staged_changes(self, activity_id: str, limit: int = 50, offset: int = 0, organization_id: Optional[str] = None) -> dict:
         """Get staged changes for an activity.
 
         Backend contract uses page/page_size; MCP contract currently uses
@@ -325,11 +373,12 @@ class RastroClient:
             "GET",
             f"/activities/{activity_id}/staged-changes",
             params={"page": page, "page_size": limit},
+            _org_id=organization_id,
         )
 
-    async def get_staged_changes_summary(self, activity_id: str) -> dict:
+    async def get_staged_changes_summary(self, activity_id: str, organization_id: Optional[str] = None) -> dict:
         """Get staged-change summary for an activity, including field completion stats when available."""
-        return await self._request("GET", f"/activities/{activity_id}/staged-changes/summary")
+        return await self._request("GET", f"/activities/{activity_id}/staged-changes/summary", _org_id=organization_id)
 
     async def bulk_review_activity_staged_changes(
         self,
@@ -337,6 +386,7 @@ class RastroClient:
         action: str = "approve_all",
         change_ids: Optional[List[str]] = None,
         rejection_reason: Optional[str] = None,
+        organization_id: Optional[str] = None,
     ) -> dict:
         """Bulk review staged changes for an activity."""
         if action.lower().startswith("approve"):
@@ -346,43 +396,57 @@ class RastroClient:
             payload["change_ids"] = change_ids
         if rejection_reason is not None:
             payload["rejection_reason"] = rejection_reason
-        return await self._request("POST", f"/activities/{activity_id}/staged-changes/bulk-review", json=payload)
+        return await self._request("POST", f"/activities/{activity_id}/staged-changes/bulk-review", json=payload, _org_id=organization_id)
 
-    async def apply_activity(self, activity_id: str) -> dict:
+    async def apply_activity(self, activity_id: str, organization_id: Optional[str] = None) -> dict:
         """Apply approved staged changes for an activity."""
         raise PermissionError("Programmatic activity apply is disabled in MCP. " "Review and apply in the dashboard.")
 
     # ── Activity endpoints ──────────────────────────────────────────────
 
-    async def list_activities(self, catalog_id: str, status: Optional[str] = None, activity_type: Optional[str] = None, limit: int = 20, offset: int = 0) -> dict:
+    async def list_activities(
+        self,
+        catalog_id: str,
+        status: Optional[str] = None,
+        activity_type: Optional[str] = None,
+        limit: int = 20,
+        offset: int = 0,
+        organization_id: Optional[str] = None,
+    ) -> dict:
         params: Dict[str, Any] = {"limit": limit, "offset": offset}
         if status:
             params["status"] = status
         if activity_type:
             params["type"] = activity_type
-        return await self._request("GET", f"/public/catalogs/{catalog_id}/activities", params=params)
+        return await self._request("GET", f"/public/catalogs/{catalog_id}/activities", params=params, _org_id=organization_id)
 
-    async def get_activity(self, activity_id: str) -> dict:
-        return await self._request("GET", f"/activities/{activity_id}")
+    async def get_activity(self, activity_id: str, organization_id: Optional[str] = None) -> dict:
+        return await self._request("GET", f"/activities/{activity_id}", _org_id=organization_id)
 
-    async def create_custom_transform_activity(self, catalog_id: str, payload: dict) -> dict:
-        return await self._request("POST", f"/public/catalogs/{catalog_id}/activities/custom-transform", json=payload)
+    async def create_custom_transform_activity(self, catalog_id: str, payload: dict, organization_id: Optional[str] = None) -> dict:
+        return await self._request("POST", f"/public/catalogs/{catalog_id}/activities/custom-transform", json=payload, _org_id=organization_id)
 
-    async def create_activity(self, catalog_id: str, payload: dict) -> dict:
-        return await self._request("POST", f"/public/catalogs/{catalog_id}/activities", json=payload)
+    async def create_activity(self, catalog_id: str, payload: dict, organization_id: Optional[str] = None) -> dict:
+        return await self._request("POST", f"/public/catalogs/{catalog_id}/activities", json=payload, _org_id=organization_id)
 
-    async def append_activity_staged_changes(self, activity_id: str, staged_changes: List[dict]) -> dict:
+    async def append_activity_staged_changes(self, activity_id: str, staged_changes: List[dict], organization_id: Optional[str] = None) -> dict:
         """Append staged changes to an existing activity."""
-        return await self._request("POST", f"/public/activities/{activity_id}/staged-changes/append", json={"staged_changes": staged_changes})
+        return await self._request("POST", f"/public/activities/{activity_id}/staged-changes/append", json={"staged_changes": staged_changes}, _org_id=organization_id)
 
-    async def set_activity_pending_review(self, activity_id: str, message: Optional[str] = None, output: Optional[dict] = None) -> dict:
+    async def set_activity_pending_review(
+        self,
+        activity_id: str,
+        message: Optional[str] = None,
+        output: Optional[dict] = None,
+        organization_id: Optional[str] = None,
+    ) -> dict:
         """Set an existing activity to pending_review and return review URL."""
         payload: Dict[str, Any] = {}
         if message is not None:
             payload["message"] = message
         if output is not None:
             payload["output"] = output
-        return await self._request("POST", f"/public/activities/{activity_id}/pending-review", json=payload)
+        return await self._request("POST", f"/public/activities/{activity_id}/pending-review", json=payload, _org_id=organization_id)
 
     async def list_catalog_snapshots(
         self,
@@ -390,27 +454,28 @@ class RastroClient:
         snapshot_type: Optional[str] = None,
         limit: int = 20,
         offset: int = 0,
+        organization_id: Optional[str] = None,
     ) -> dict:
         params: Dict[str, Any] = {"limit": limit, "offset": offset}
         if snapshot_type:
             params["snapshot_type"] = snapshot_type
-        return await self._request("GET", f"/public/catalogs/{catalog_id}/snapshots", params=params)
+        return await self._request("GET", f"/public/catalogs/{catalog_id}/snapshots", params=params, _org_id=organization_id)
 
-    async def create_catalog_snapshot(self, catalog_id: str, reason: str) -> dict:
-        return await self._request("POST", f"/public/catalogs/{catalog_id}/snapshots", json={"reason": reason})
+    async def create_catalog_snapshot(self, catalog_id: str, reason: str, organization_id: Optional[str] = None) -> dict:
+        return await self._request("POST", f"/public/catalogs/{catalog_id}/snapshots", json={"reason": reason}, _org_id=organization_id)
 
-    async def restore_catalog_snapshot(self, catalog_id: str, snapshot_id: str) -> dict:
-        return await self._request("POST", f"/public/catalogs/{catalog_id}/snapshots/{snapshot_id}/restore")
+    async def restore_catalog_snapshot(self, catalog_id: str, snapshot_id: str, organization_id: Optional[str] = None) -> dict:
+        return await self._request("POST", f"/public/catalogs/{catalog_id}/snapshots/{snapshot_id}/restore", _org_id=organization_id)
 
-    async def duplicate_catalog(self, catalog_id: str, payload: dict) -> dict:
-        return await self._request("POST", f"/public/catalogs/{catalog_id}/duplicate", json=payload)
+    async def duplicate_catalog(self, catalog_id: str, payload: dict, organization_id: Optional[str] = None) -> dict:
+        return await self._request("POST", f"/public/catalogs/{catalog_id}/duplicate", json=payload, _org_id=organization_id)
 
-    async def delete_catalog(self, catalog_id: str) -> dict:
+    async def delete_catalog(self, catalog_id: str, organization_id: Optional[str] = None) -> dict:
         """Delete a catalog by ID (irreversible)."""
-        return await self._request("DELETE", f"/catalogs/{catalog_id}")
+        return await self._request("DELETE", f"/catalogs/{catalog_id}", _org_id=organization_id)
 
-    async def save_activity_as_workflow(self, catalog_id: str, activity_id: str, payload: dict) -> dict:
-        return await self._request("POST", f"/public/catalogs/{catalog_id}/activities/{activity_id}/save-workflow", json=payload)
+    async def save_activity_as_workflow(self, catalog_id: str, activity_id: str, payload: dict, organization_id: Optional[str] = None) -> dict:
+        return await self._request("POST", f"/public/catalogs/{catalog_id}/activities/{activity_id}/save-workflow", json=payload, _org_id=organization_id)
 
     # ── Public workflow endpoints ─────────────────────────────────────
 

@@ -7,6 +7,7 @@ Registers all tools in three categories:
 - execution_*: Local snapshot, diff, and validation
 
 Usage:
+    RASTRO_AUTH_TOKEN=<bearer-token> python -m rastro_mcp.server
     RASTRO_API_KEY=rastro_pk_... python -m rastro_mcp.server
 
 Or via MCP stdio transport for integration with Claude/Codex.
@@ -113,7 +114,7 @@ TOOL_DEFINITIONS = [
             "properties": {
                 "limit": {"type": "integer", "default": 50, "description": "Max results to return"},
                 "offset": {"type": "integer", "default": 0, "description": "Offset for pagination"},
-                "organization_id": {"type": "string", "description": "Override organization UUID (requires API key creator to be a member of this org)"},
+                "organization_id": {"type": "string", "description": "Override organization UUID. The authenticated user must belong to this org."},
             },
         },
     },
@@ -124,7 +125,7 @@ TOOL_DEFINITIONS = [
             "type": "object",
             "properties": {
                 "catalog_id": {"type": "string", "description": "Catalog UUID"},
-                "organization_id": {"type": "string", "description": "Override organization UUID (requires API key creator to be a member of this org)"},
+                "organization_id": {"type": "string", "description": "Override organization UUID. The authenticated user must belong to this org."},
             },
             "required": ["catalog_id"],
         },
@@ -151,6 +152,7 @@ TOOL_DEFINITIONS = [
             "properties": {
                 "catalog_id": {"type": "string", "description": "Catalog UUID"},
                 "version": {"type": "string", "description": "Schema version (optional, defaults to current)"},
+                "organization_id": {"type": "string", "description": "Override organization UUID"},
             },
             "required": ["catalog_id"],
         },
@@ -162,6 +164,7 @@ TOOL_DEFINITIONS = [
             "type": "object",
             "properties": {
                 "catalog_id": {"type": "string", "description": "Catalog UUID"},
+                "organization_id": {"type": "string", "description": "Override organization UUID"},
             },
             "required": ["catalog_id"],
         },
@@ -240,6 +243,7 @@ TOOL_DEFINITIONS = [
             "properties": {
                 "catalog_id": {"type": "string", "description": "Catalog UUID"},
                 "item_id": {"type": "string", "description": "Item UUID (database ID)"},
+                "organization_id": {"type": "string", "description": "Override organization UUID"},
             },
             "required": ["catalog_id", "item_id"],
         },
@@ -253,6 +257,7 @@ TOOL_DEFINITIONS = [
                 "catalog_id": {"type": "string", "description": "Catalog UUID"},
                 "item_id": {"type": "string", "description": "Item UUID (database ID)"},
                 "data": {"type": "object", "description": "Key-value pairs to update in item.data"},
+                "organization_id": {"type": "string", "description": "Override organization UUID"},
             },
             "required": ["catalog_id", "item_id", "data"],
         },
@@ -268,6 +273,7 @@ TOOL_DEFINITIONS = [
                 "activity_type": {"type": "string", "description": "Filter by type (custom_transform, etc.)"},
                 "limit": {"type": "integer", "default": 20},
                 "offset": {"type": "integer", "default": 0},
+                "organization_id": {"type": "string", "description": "Override organization UUID"},
             },
             "required": ["catalog_id"],
         },

@@ -115,12 +115,18 @@ async def catalog_delete(client: RastroClient, params: CatalogDeleteInput) -> di
 
 async def catalog_schema_get(client: RastroClient, params: CatalogSchemaGetInput) -> dict:
     """Get catalog schema definition with field metadata."""
-    return await client.get_catalog_schema(params.catalog_id, version=params.version)
+    kwargs: Dict[str, Any] = {}
+    if params.organization_id:
+        kwargs["organization_id"] = params.organization_id
+    return await client.get_catalog_schema(params.catalog_id, version=params.version, **kwargs)
 
 
 async def catalog_taxonomy_get(client: RastroClient, params: CatalogTaxonomyGetInput) -> dict:
     """Get catalog taxonomy with computed inheritance."""
-    return await client.get_catalog_taxonomy(params.catalog_id)
+    kwargs: Dict[str, Any] = {}
+    if params.organization_id:
+        kwargs["organization_id"] = params.organization_id
+    return await client.get_catalog_taxonomy(params.catalog_id, **kwargs)
 
 
 async def catalog_update_quality_prompt(client: RastroClient, params: CatalogUpdateQualityPromptInput) -> dict:
@@ -140,6 +146,9 @@ async def catalog_get_md(client: RastroClient, params: CatalogGetMdInput) -> dic
 
 async def catalog_items_query(client: RastroClient, params: CatalogItemsQueryInput) -> dict:
     """Query raw catalog items with pagination, search, sorting, and entity-type awareness."""
+    kwargs: Dict[str, Any] = {}
+    if params.organization_id:
+        kwargs["organization_id"] = params.organization_id
     return await client.get_catalog_raw_items(
         catalog_id=params.catalog_id,
         limit=params.limit,
@@ -148,12 +157,16 @@ async def catalog_items_query(client: RastroClient, params: CatalogItemsQueryInp
         search=params.search,
         sort_field=params.sort_field,
         sort_order=params.sort_order,
+        **kwargs,
     )
 
 
 async def catalog_item_get(client: RastroClient, params: CatalogItemGetInput) -> dict:
     """Get a single raw catalog item by ID, including entity_type and parent linkage."""
-    return await client.get_catalog_raw_item(params.catalog_id, params.item_id)
+    kwargs: Dict[str, Any] = {}
+    if params.organization_id:
+        kwargs["organization_id"] = params.organization_id
+    return await client.get_catalog_raw_item(params.catalog_id, params.item_id, **kwargs)
 
 
 async def catalog_item_update(client: RastroClient, params: CatalogItemUpdateInput) -> dict:
@@ -175,12 +188,16 @@ async def catalog_items_bulk_update(client: RastroClient, params: CatalogItemsBu
 
 async def catalog_activity_list(client: RastroClient, params: CatalogActivityListInput) -> dict:
     """List activities for a catalog."""
+    kwargs: Dict[str, Any] = {}
+    if params.organization_id:
+        kwargs["organization_id"] = params.organization_id
     return await client.list_activities(
         catalog_id=params.catalog_id,
         status=params.status,
         activity_type=params.activity_type,
         limit=params.limit,
         offset=params.offset,
+        **kwargs,
     )
 
 

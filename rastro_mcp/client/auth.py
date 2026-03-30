@@ -73,7 +73,15 @@ def load_auth_from_env() -> RastroAuth:
         credential_source = "RASTRO_API_KEY"
 
     if not token:
-        raise ValueError("One of RASTRO_AUTH_TOKEN, RASTRO_USER_TOKEN, or RASTRO_API_KEY environment variables is required")
+        from rastro_mcp.cli import load_token_from_file
+
+        token = load_token_from_file()
+        credential_source = "credentials_file"
+
+    if not token:
+        raise ValueError(
+            "Authentication required. Set RASTRO_API_KEY or run `rastro-mcp login` to authenticate via browser."
+        )
 
     return RastroAuth(
         token=token,

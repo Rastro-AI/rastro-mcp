@@ -93,7 +93,7 @@ from rastro_mcp.tools.service_tools import (
     service_judge_catalog_rows,
     service_map_to_catalog_schema,
 )
-from rastro_mcp.tools.viewer_tools import catalog_visualize_local
+from rastro_mcp.tools.viewer_tools import catalog_visualize_local, image_review_local
 
 
 def _is_truthy_env(name: str) -> bool:
@@ -515,6 +515,19 @@ TOOL_DEFINITIONS = [
             },
         },
     },
+    {
+        "name": "service_image_review",
+        "description": "Open a local browser UI to review image generation results. Pass run IDs from service_image_run and optional context per run (product title, finish, etc.). Supports reviewing many runs in parallel.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "run_ids": {"type": "array", "items": {"type": "string"}, "description": "List of image editor run IDs to review"},
+                "contexts": {"type": "object", "description": "Optional dict mapping run_id to context (e.g. {\"run-id\": {\"title\": \"CL-115 Rust\", \"finish\": \"Rust\"}})"},
+                "title": {"type": "string", "default": "Image Generation Review"},
+            },
+            "required": ["run_ids"],
+        },
+    },
     # ── Execution tools ──────────────────────────────────────────────
     {
         "name": "execution_catalog_snapshot_pull",
@@ -672,6 +685,13 @@ async def dispatch_tool(client: RastroClient, tool_name: str, arguments: Dict[st
         return await service_image_status(client, ServiceImageStatusInput(**arguments))
     elif tool_name == "service_image_list":
         return await service_image_list(client, ServiceImageListInput(**arguments))
+    elif tool_name == "service_image_review":
+        return await image_review_local(
+            client,
+            run_ids=arguments.get("run_ids", []),
+            contexts=arguments.get("contexts"),
+            title=arguments.get("title", "Image Generation Review"),
+        )
 
     # Execution tools
     elif tool_name == "execution_catalog_snapshot_pull":

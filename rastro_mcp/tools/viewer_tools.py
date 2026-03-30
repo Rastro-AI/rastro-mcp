@@ -710,6 +710,24 @@ def _make_viewer_request_handler(local_viewer_server: "_LocalViewerServer"):
 
             self.send_error(404, "Not found")
 
+        def do_POST(self) -> None:  # noqa: N802
+            if self.path == "/picks":
+                content_length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(content_length)
+                # Write picks to the most recently registered artifact dir
+                with local_viewer_server._artifact_roots_lock:
+                    roots = list(local_viewer_server._artifact_roots.values())
+                if roots:
+                    picks_path = roots[-1] / "picks.json"
+                    picks_path.write_text(body.decode("utf-8"), encoding="utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(b'{"ok":true}')
+                return
+            self.send_error(404, "Not found")
+
         def log_message(self, format: str, *args: Any) -> None:
             return
 
@@ -1071,3 +1089,112 @@ async def catalog_visualize_local(client: RastroClient, params: CatalogVisualize
         opened_in_browser=opened_in_browser,
         warnings=output_warnings,
     )
+
+
+async def image_review_local(
+    client: RastroClient,
+    groups: Optional[List[Dict[str, Any]]] = None,
+    run_ids: Optional[List[str]] = None,
+    contexts: Optional[Dict[str, Dict[str, Any]]] = None,
+    title: str = "Image Generation Review",
+    output_dir: str = "/tmp/rastro-viewer",
+) -> Dict[str, Any]:
+    """Open a local browser UI to review image generation results.
+
+    Supports two modes:
+    - **Grouped** (preferred): pass ``groups`` — a list of dicts, each with:
+        - title: str (e.g. "CL-115 Rust")
+        - run_ids: list of run IDs (options for this variant)
+        - original_url: str (source image)
+        - ref_url: str (reference finish image, optional)
+        - prompt: str
+        - context: dict (extra metadata like finish name)
+    - **Flat** (legacy): pass ``run_ids`` + ``contexts`` — one card per run
+    """
+
+    async def _fetch_run(run_id: str) -> Dict[str, Any]:
+        try:
+            data = await client.image_status(run_id)
+        except Exception:
+            return {"status": "unknown", "result_urls": [], "run_id": run_id}
+
+        result = data.get("result") or {}
+        result_urls = []
+        if isinstance(result, dict):
+            result_urls = result.get("image_urls", [])
+        elif isinstance(result, list):
+            for r in result:
+                url = r.get("url") if isinstance(r, dict) else r
+                if url:
+                    result_urls.append(url)
+
+        return {
+            "run_id": run_id,
+            "status": data.get("status", "unknown"),
+            "result_urls": result_urls,
+            "model": data.get("model_used"),
+            "prompt": data.get("prompt") or (data.get("request_data") or {}).get("prompt"),
+            "input_image_url": data.get("input_image_url") or (data.get("request_data") or {}).get("image_url"),
+            "error": data.get("error"),
+        }
+
+    if groups:
+        # Grouped mode: fetch runs per group
+        review_groups = []
+        for g in groups:
+            runs = []
+            for rid in g.get("run_ids", []):
+                runs.append(await _fetch_run(rid))
+            review_groups.append({
+                "title": g.get("title", "Variant"),
+                "original_url": g.get("original_url"),
+                "ref_url": g.get("ref_url"),
+                "prompt": g.get("prompt"),
+                "context": g.get("context", {}),
+                "runs": runs,
+            })
+        review_data = {"title": title, "subtitle": f"{len(review_groups)} variants", "groups": review_groups}
+    else:
+        # Flat mode: one group per run
+        review_groups = []
+        for rid in (run_ids or []):
+            run = await _fetch_run(rid)
+            ctx = (contexts or {}).get(rid, {})
+            review_groups.append({
+                "title": ctx.get("title", run.get("prompt", "")[:60]),
+                "original_url": run.get("input_image_url"),
+                "ref_url": ctx.get("ref_image"),
+                "prompt": run.get("prompt"),
+                "context": ctx,
+                "runs": [run],
+            })
+        review_data = {"title": title, "subtitle": f"{len(review_groups)} items", "groups": review_groups}
+
+    artifact_dir = _build_artifact_dir(output_dir, "image-review", title)
+    template_path = _viewer_source_dir() / "image_review_template.html"
+    template_html = template_path.read_text(encoding="utf-8")
+
+    rendered = template_html.replace("__RASTRO_VIEWER_TITLE__", html.escape(title))
+    rendered = rendered.replace("__RASTRO_IMAGE_REVIEW_DATA__", json.dumps(review_data, ensure_ascii=False, default=str))
+
+    viewer_path = artifact_dir / "viewer.html"
+    viewer_path.write_text(rendered, encoding="utf-8")
+
+    viewer_server = _get_viewer_server()
+    viewer_url = viewer_server.artifact_url_for(viewer_path)
+
+    try:
+        webbrowser.open(viewer_url)
+    except Exception:
+        pass
+
+    all_runs = [r for g in review_data["groups"] for r in g.get("runs", [])]
+    return {
+        "viewer_url": viewer_url,
+        "artifact_dir": str(artifact_dir),
+        "groups": len(review_data["groups"]),
+        "total_runs": len(all_runs),
+        "completed": sum(1 for r in all_runs if r.get("status") == "completed" and r.get("result_urls")),
+        "failed": sum(1 for r in all_runs if r.get("status") == "failed"),
+        "processing": sum(1 for r in all_runs if r.get("status") in ("processing", "pending")),
+    }

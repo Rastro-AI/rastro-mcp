@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>__RASTRO_VIEWER_TITLE__</title>
+    <style>
+      :root { --bg: #f6f8fb; --panel: #fff; --line: #d9e2ec; --text: #111827; --muted: #6b7280; --accent: #2563eb; --green: #059669; --red: #dc2626; --pick: #059669; --radius: 14px; }
+      * { box-sizing: border-box; margin: 0; }
+      body { background: var(--bg); color: var(--text); font-family: "IBM Plex Sans", system-ui, sans-serif; padding: 24px; }
+      h1 { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
+      .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+      .top-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+      .top-bar button { padding: 6px 14px; border-radius: 8px; font-size: 12px; border: 1px solid var(--line); background: var(--panel); cursor: pointer; }
+      .top-bar button.primary { background: var(--green); color: #fff; border-color: var(--green); }
+      .counter { font-size: 13px; color: var(--muted); }
+      .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); margin-bottom: 20px; overflow: hidden; }
+      .card.has-pick { border-color: var(--pick); box-shadow: 0 0 0 2px rgba(5,150,105,0.15); }
+      .card-header { padding: 12px 16px 8px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 10px; }
+      .card-title { font-size: 15px; font-weight: 600; flex: 1; }
+      .status { padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+      .status.completed { background: #d1fae5; color: var(--green); }
+      .status.processing { background: #fef3c7; color: #92400e; }
+      .status.failed { background: #fee2e2; color: var(--red); }
+      .media-row { display: flex; gap: 2px; background: #e5e7eb; min-height: 200px; }
+      .media-col { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #f9fafb; padding: 10px; min-width: 0; position: relative; }
+      .media-col.source { max-width: 150px; background: #f3f4f6; border-right: 2px solid var(--line); }
+      .media-col.ref { max-width: 150px; background: #fef9f0; border-right: 2px solid #fbbf24; }
+      .media-col.option { cursor: pointer; transition: background 0.15s; }
+      .media-col.option:hover { background: #f0fdf4; }
+      .media-col.picked { background: #ecfdf5; outline: 3px solid var(--pick); outline-offset: -3px; }
+      .media-col.picked::after { content: "✓ picked"; position: absolute; top: 6px; right: 6px; background: var(--pick); color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 4px; }
+      .media-col img, .media-col video { max-width: 100%; max-height: 260px; object-fit: contain; border-radius: 6px; }
+      .media-col .label { font-size: 10px; color: var(--muted); margin-top: 5px; text-transform: uppercase; letter-spacing: 0.5px; }
+      .media-col .model-tag { font-size: 10px; color: var(--accent); margin-top: 1px; }
+      .prompt-bar { padding: 8px 16px; background: #f8fafc; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+      .prompt-bar code { background: #e8f0ff; color: var(--accent); padding: 1px 5px; border-radius: 3px; font-size: 11px; }
+      .context { padding: 8px 16px; border-top: 1px solid var(--line); display: flex; gap: 16px; flex-wrap: wrap; }
+      .context-item { font-size: 12px; }
+      .context-item .k { color: var(--muted); }
+      .context-item .v { font-weight: 500; }
+      .feedback-bar { padding: 8px 16px; border-top: 1px solid var(--line); display: flex; gap: 8px; align-items: center; }
+      .feedback-bar input { flex: 1; padding: 5px 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 12px; }
+      .feedback-bar input:focus { outline: none; border-color: var(--accent); }
+      .empty-msg { color: var(--muted); font-size: 13px; font-style: italic; }
+      .failed-msg { color: var(--red); font-size: 13px; }
+      .saved-toast { position: fixed; bottom: 24px; right: 24px; background: var(--green); color: #fff; padding: 10px 20px; border-radius: 8px; font-size: 13px; display: none; z-index: 99; }
+    </style>
+  </head>
+  <body>
+    <h1 id="title"></h1>
+    <div class="subtitle" id="subtitle"></div>
+    <div class="top-bar">
+      <button onclick="location.reload()">Refresh</button>
+      <button class="primary" onclick="savePicks()">Save picks</button>
+      <span class="counter" id="counter"></span>
+    </div>
+    <div id="cards"></div>
+    <div class="saved-toast" id="toast">Picks saved</div>
+    <script>
+      const DATA = __RASTRO_IMAGE_REVIEW_DATA__;
+      const picks = {};  // groupIdx -> { runIdx, url, feedback }
+
+      const VIDEO_EXTS = ['.mp4', '.webm', '.mov', '.avi', '.mkv'];
+      function isVideo(url) {
+        if (!url) return false;
+        const lower = url.split('?')[0].toLowerCase();
+        return VIDEO_EXTS.some(ext => lower.endsWith(ext));
+      }
+
+      function mediaTag(url, cls) {
+        if (!url) return '';
+        if (isVideo(url)) {
+          return `<video src="${url}" controls muted playsinline class="${cls || ''}"></video>`;
+        }
+        return `<img src="${url}" class="${cls || ''}" />`;
+      }
+
+      function pickOption(groupIdx, runIdx, url) {
+        const prev = picks[groupIdx];
+        if (prev && prev.runIdx === runIdx && prev.url === url) {
+          delete picks[groupIdx];  // toggle off
+        } else {
+          picks[groupIdx] = { runIdx, url, feedback: (prev && prev.feedback) || '' };
+        }
+        render();
+      }
+
+      function updateFeedback(groupIdx, value) {
+        if (!picks[groupIdx]) picks[groupIdx] = { runIdx: -1, url: null, feedback: value };
+        else picks[groupIdx].feedback = value;
+      }
+
+      function savePicks() {
+        const groups = DATA.groups || [];
+        const payload = groups.map((g, i) => {
+          const p = picks[i];
+          return {
+            title: g.title,
+            context: g.context || {},
+            picked_url: p ? p.url : null,
+            picked_option: p ? p.runIdx : null,
+            feedback: p ? p.feedback : '',
+          };
+        });
+        // POST to local server
+        fetch('/picks', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) })
+          .then(() => { const t = document.getElementById('toast'); t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 2000); })
+          .catch(e => alert('Save failed: ' + e));
+      }
+
+      function render() {
+        document.getElementById('title').textContent = DATA.title || 'Media Review';
+        document.getElementById('subtitle').textContent = DATA.subtitle || '';
+
+        const groups = DATA.groups || [];
+        const allRuns = groups.flatMap(g => g.runs || []);
+        const completed = allRuns.filter(r => r.status === 'completed' && r.result_urls && r.result_urls.length > 0).length;
+        const failed = allRuns.filter(r => r.status === 'failed').length;
+        const picked = Object.values(picks).filter(p => p.url).length;
+        document.getElementById('counter').textContent =
+          `${completed} completed, ${failed} failed, ${picked} picked — ${allRuns.length} runs, ${groups.length} variants`;
+
+        document.getElementById('cards').innerHTML = groups.map((g, gi) => renderGroup(g, gi)).join('');
+      }
+
+      function renderGroup(group, groupIdx) {
+        const runs = group.runs || [];
+        const anyDone = runs.some(r => r.status === 'completed' && r.result_urls && r.result_urls.length);
+        const allFail = runs.length > 0 && runs.every(r => r.status === 'failed');
+        const statusClass = allFail ? 'failed' : anyDone ? 'completed' : 'processing';
+        const pick = picks[groupIdx];
+        const hasPick = pick && pick.url;
+
+        let cols = '';
+
+        // Original
+        if (group.original_url) {
+          cols += `<div class="media-col source">${mediaTag(group.original_url)}<div class="label">Original</div></div>`;
+        }
+
+        // Reference
+        if (group.ref_url) {
+          cols += `<div class="media-col ref">${mediaTag(group.ref_url)}<div class="label">Reference</div></div>`;
+        }
+
+        // Options
+        let optNum = 0;
+        runs.forEach((run, ri) => {
+          if (run.status === 'completed' && run.result_urls && run.result_urls.length > 0) {
+            run.result_urls.forEach((url) => {
+              optNum++;
+              const isPicked = hasPick && pick.url === url;
+              cols += `<div class="media-col option${isPicked ? ' picked' : ''}" onclick="pickOption(${groupIdx},${ri},'${url}')">${mediaTag(url)}<div class="label">Option ${optNum}</div>${run.model ? '<div class="model-tag">' + run.model + '</div>' : ''}</div>`;
+            });
+          } else if (run.status === 'failed') {
+            // skip failed
+          } else if (run.status === 'processing' || run.status === 'pending') {
+            optNum++;
+            cols += `<div class="media-col"><div class="empty-msg">Processing...</div><div class="label">Option ${optNum}</div></div>`;
+          }
+        });
+
+        // Context
+        let ctxHtml = '';
+        if (group.context && Object.keys(group.context).length) {
+          const items = Object.entries(group.context).filter(([k]) => !['title','ref_image','option'].includes(k))
+            .map(([k,v]) => `<div class="context-item"><span class="k">${k}:</span> <span class="v">${v}</span></div>`).join('');
+          if (items) ctxHtml = `<div class="context">${items}</div>`;
+        }
+
+        const prompt = group.prompt || '';
+        const promptHtml = prompt ? `<div class="prompt-bar"><code>edit</code> ${prompt}</div>` : '';
+
+        const fb = (pick && pick.feedback) || '';
+        const feedbackHtml = `<div class="feedback-bar"><input type="text" placeholder="Add feedback..." value="${fb}" onchange="updateFeedback(${groupIdx}, this.value)" /></div>`;
+
+        return `<div class="card${hasPick ? ' has-pick' : ''}">
+          <div class="card-header"><div class="card-title">${group.title}</div><span class="status ${statusClass}">${statusClass}</span></div>
+          <div class="media-row">${cols}</div>
+          ${promptHtml}${ctxHtml}${feedbackHtml}
+        </div>`;
+      }
+
+      render();
+    </script>
+  </body>
+</html>

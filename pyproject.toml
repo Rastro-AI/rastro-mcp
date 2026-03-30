@@ -23,7 +23,7 @@ dependencies = [
 ]
 
 [project.scripts]
-rastro-mcp = "rastro_mcp.server:main"
+rastro-mcp = "rastro_mcp.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/Rastro-AI/rastro-mcp"

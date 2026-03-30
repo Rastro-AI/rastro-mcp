@@ -493,6 +493,9 @@ class RastroClient:
 
     # ── Image editor endpoints ──────────────────────────────────────────
 
+    async def image_host(self, source_url: str) -> dict:
+        return await self._request("POST", "/image-editor/images/host", json={"source_url": source_url})
+
     async def image_run(self, payload: dict) -> dict:
         return await self._request("POST", "/image-editor/runs", json=payload)
 

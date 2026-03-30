@@ -47,6 +47,7 @@ from rastro_mcp.models.contracts import (
     CatalogUpdateQualityPromptInput,
     CatalogVisualizeLocalInput,
     DiffComputeInput,
+    ServiceImageHostInput,
     ServiceImageListInput,
     ServiceImageRunInput,
     ServiceImageStatusInput,
@@ -85,6 +86,7 @@ from rastro_mcp.tools.execution_tools import (
     execution_local_diff_compute,
 )
 from rastro_mcp.tools.service_tools import (
+    service_image_host,
     service_image_list,
     service_image_run,
     service_image_status,
@@ -304,12 +306,13 @@ TOOL_DEFINITIONS = [
     },
     {
         "name": "catalog_visualize_local",
-        "description": "Build a local HTML artifact for visually inspecting a catalog or an activity's staged changes, then optionally open it in the browser.",
+        "description": "Build a local HTML artifact for visually inspecting a catalog, an activity's staged changes, or arbitrary rows, then optionally open it in the browser. Pass 'rows' for quick previews without a catalog.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "catalog_id": {"type": "string", "description": "Catalog UUID to visualize"},
                 "activity_id": {"type": "string", "description": "Activity UUID to visualize"},
+                "rows": {"type": "array", "items": {"type": "object"}, "description": "Arbitrary row dicts to visualize (no catalog/activity needed). Images are auto-detected from URLs in the data."},
                 "mode": {"type": "string", "enum": ["auto", "catalog", "activity"], "default": "auto"},
                 "title": {"type": "string", "description": "Optional custom viewer title"},
                 "limit": {"type": "integer", "default": 500, "description": "Maximum matching records to load into the artifact"},
@@ -439,7 +442,7 @@ TOOL_DEFINITIONS = [
     },
     {
         "name": "service_judge_catalog_rows",
-        "description": "Judge catalog rows for data quality. Uses the catalog's schema and quality_prompt automatically when catalog_id is provided.",
+        "description": "Judge catalog rows for data quality. Supports multimodal: pass explicit image URLs via 'images' to evaluate whether images match row data. Uses the catalog's schema and quality_prompt automatically when catalog_id is provided.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -449,8 +452,20 @@ TOOL_DEFINITIONS = [
                 "prompt": {"type": "string", "description": "Extra judging instructions (appended to catalog's quality_prompt)"},
                 "model": {"type": "string", "default": "fast", "description": "Model preset: fast, medium, high"},
                 "max_rows": {"type": "integer", "default": 200},
+                "images": {"type": "object", "description": "Explicit image URLs per row index, e.g. {\"0\": [\"https://...\"]}. When provided, uses vision model to evaluate image-data consistency."},
             },
             "required": ["rows"],
+        },
+    },
+    {
+        "name": "service_image_host",
+        "description": "Download an external image and host it on Supabase Storage. Returns the hosted URL.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "source_url": {"type": "string", "description": "External image URL to download and host"},
+            },
+            "required": ["source_url"],
         },
     },
     {
@@ -463,6 +478,7 @@ TOOL_DEFINITIONS = [
                 "image_url": {"type": "string", "description": "Input image URL (required for edit/inpaint/bg_remove/relight/upscale)"},
                 "mask_url": {"type": "string", "description": "Mask URL (required for inpaint)"},
                 "prompt": {"type": "string", "description": "Text prompt (required for generate/edit/inpaint)"},
+                "prompt_image_urls": {"type": "array", "items": {"type": "string"}, "description": "Additional reference images for multi-image prompts (e.g., a color swatch to match)"},
                 "provider": {"type": "string", "description": "Model provider override"},
                 "quality": {"type": "string", "enum": ["high", "low"]},
                 "size": {"type": "string", "description": "Output size"},
@@ -648,6 +664,8 @@ async def dispatch_tool(client: RastroClient, tool_name: str, arguments: Dict[st
         return await service_map_to_catalog_schema(client, ServiceMapToCatalogSchemaInput(**arguments))
     elif tool_name == "service_judge_catalog_rows":
         return await service_judge_catalog_rows(client, ServiceJudgeCatalogRowsInput(**arguments))
+    elif tool_name == "service_image_host":
+        return await service_image_host(client, ServiceImageHostInput(**arguments))
     elif tool_name == "service_image_run":
         return await service_image_run(client, ServiceImageRunInput(**arguments))
     elif tool_name == "service_image_status":

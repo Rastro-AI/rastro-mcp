@@ -210,6 +210,7 @@ class CatalogActivityGetStagedChangesInput(BaseModel):
 class CatalogVisualizeLocalInput(BaseModel):
     catalog_id: Optional[str] = None
     activity_id: Optional[str] = None
+    rows: Optional[List[Dict[str, Any]]] = None
     mode: str = "auto"
     title: Optional[str] = None
     limit: int = Field(default=500, ge=1, le=1000)
@@ -220,12 +221,15 @@ class CatalogVisualizeLocalInput(BaseModel):
 
     @model_validator(mode="after")
     def validate_target(self):
+        if self.rows is not None:
+            return self
+
         if not self.catalog_id and not self.activity_id:
-            raise ValueError("Provide at least one of catalog_id or activity_id")
+            raise ValueError("Provide at least one of catalog_id, activity_id, or rows")
 
         mode = (self.mode or "auto").lower()
-        if mode not in {"auto", "catalog", "activity"}:
-            raise ValueError("mode must be one of: auto, catalog, activity")
+        if mode not in {"auto", "catalog", "activity", "rows"}:
+            raise ValueError("mode must be one of: auto, catalog, activity, rows")
 
         if mode == "catalog" and not self.catalog_id:
             raise ValueError("catalog_id is required when mode='catalog'")
@@ -357,6 +361,11 @@ class ServiceJudgeCatalogRowsInput(BaseModel):
     prompt: Optional[str] = None
     model: str = "fast"
     max_rows: int = 200
+    images: Optional[Dict[str, List[str]]] = None
+
+
+class ServiceImageHostInput(BaseModel):
+    source_url: str
 
 
 class ServiceImageRunInput(BaseModel):
@@ -364,6 +373,7 @@ class ServiceImageRunInput(BaseModel):
     image_url: Optional[str] = None
     mask_url: Optional[str] = None
     prompt: Optional[str] = None
+    prompt_image_urls: Optional[List[str]] = None
     provider: Optional[str] = None
     quality: Optional[str] = None
     size: Optional[str] = None

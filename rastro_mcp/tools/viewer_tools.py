@@ -966,17 +966,72 @@ async def _fetch_activity_bundle(client: RastroClient, params: CatalogVisualizeL
     }
 
 
-async def catalog_visualize_local(client: RastroClient, params: CatalogVisualizeLocalInput) -> CatalogVisualizeLocalOutput:
-    """Generate a local HTML viewer for a catalog or activity and optionally open it."""
-    mode = (params.mode or "auto").lower()
-    resolved_mode = "activity" if mode == "activity" or (mode == "auto" and params.activity_id and not params.catalog_id) else "catalog"
+def _build_raw_rows_bundle(params: CatalogVisualizeLocalInput) -> Dict[str, Any]:
+    """Build a viewer bundle from arbitrary rows passed directly (no API fetch)."""
+    raw_rows = params.rows or []
+    title = params.title or "Data preview"
 
-    if resolved_mode == "catalog":
-        bundle = await _fetch_catalog_bundle(client, params)
-        artifact_identifier = params.catalog_id or "catalog"
+    # Collect field order from all rows
+    all_fields: list[str] = []
+    seen: set[str] = set()
+    for row in raw_rows:
+        for key in row:
+            if key not in seen:
+                seen.add(key)
+                all_fields.append(key)
+
+    records: List[Dict[str, Any]] = []
+    for idx, row in enumerate(raw_rows):
+        if not isinstance(row, dict):
+            continue
+        images, documents, links = _collect_urls(row)
+        record_id = str(row.get("id") or row.get("__catalog_item_id") or f"row-{idx}")
+        records.append({
+            "id": record_id,
+            "entity_type": "record",
+            "title": _pick_title(row, fallback=record_id),
+            "identifier": _pick_identifier(row, fallback=record_id),
+            "images": images,
+            "documents": documents,
+            "external_url": _pick_external_url(row, links),
+            "data": row,
+        })
+
+    field_analytics = _compute_field_analytics([r.get("data") or {} for r in records], all_fields)
+
+    return {
+        "mode": "catalog",
+        "title": title,
+        "catalog": None,
+        "activity": None,
+        "schema": {"field_order": all_fields, "fields": {f: {"type": "string"} for f in all_fields}},
+        "field_analytics": field_analytics,
+        "records": records,
+        "variant_records": [],
+        "_meta": {
+            "loaded_records": len(records),
+            "total_available": len(records),
+            "warnings": [],
+        },
+    }
+
+
+async def catalog_visualize_local(client: RastroClient, params: CatalogVisualizeLocalInput) -> CatalogVisualizeLocalOutput:
+    """Generate a local HTML viewer for a catalog, activity, or arbitrary rows and optionally open it."""
+    if params.rows is not None:
+        bundle = _build_raw_rows_bundle(params)
+        artifact_identifier = "preview"
+        resolved_mode = "rows"
     else:
-        bundle = await _fetch_activity_bundle(client, params)
-        artifact_identifier = params.activity_id or "activity"
+        mode = (params.mode or "auto").lower()
+        resolved_mode = "activity" if mode == "activity" or (mode == "auto" and params.activity_id and not params.catalog_id) else "catalog"
+
+        if resolved_mode == "catalog":
+            bundle = await _fetch_catalog_bundle(client, params)
+            artifact_identifier = params.catalog_id or "catalog"
+        else:
+            bundle = await _fetch_activity_bundle(client, params)
+            artifact_identifier = params.activity_id or "activity"
 
     artifact_dir = _build_artifact_dir(params.output_dir, resolved_mode, artifact_identifier)
     bundle_path = artifact_dir / "bundle.json"

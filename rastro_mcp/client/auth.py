@@ -15,14 +15,14 @@ class RastroAuth:
 
     token: str
     organization_id: Optional[str] = None
-    base_url: str = "https://api.rastro.ai/api"
+    base_url: str = "https://catalogapi.rastro.ai/api"
     credential_source: str = "bearer"
 
     def __init__(
         self,
         token: Optional[str] = None,
         organization_id: Optional[str] = None,
-        base_url: str = "https://api.rastro.ai/api",
+        base_url: str = "https://catalogapi.rastro.ai/api",
         credential_source: str = "bearer",
         api_key: Optional[str] = None,
     ):
@@ -59,7 +59,7 @@ def load_auth_from_env() -> RastroAuth:
         RASTRO_USER_TOKEN: User bearer token / JWT
         RASTRO_API_KEY: API key (rastro_pk_*)
         RASTRO_ORGANIZATION_ID: Organization UUID override. Recommended for user tokens.
-        RASTRO_BASE_URL: API base URL (default: https://api.rastro.ai/api)
+        RASTRO_BASE_URL: API base URL (default: https://catalogapi.rastro.ai/api)
     """
     token = os.environ.get("RASTRO_AUTH_TOKEN")
     credential_source = "RASTRO_AUTH_TOKEN"
@@ -86,6 +86,6 @@ def load_auth_from_env() -> RastroAuth:
     return RastroAuth(
         token=token,
         organization_id=os.environ.get("RASTRO_ORGANIZATION_ID"),
-        base_url=os.environ.get("RASTRO_BASE_URL", "https://api.rastro.ai/api"),
+        base_url=os.environ.get("RASTRO_BASE_URL") or "https://catalogapi.rastro.ai/api",
         credential_source=credential_source,
     )

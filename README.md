@@ -405,7 +405,7 @@ Single unified prompt guiding the agent through catalog operations, product-vari
 | `RASTRO_AUTH_TOKEN` | optional | Preferred bearer token env var. Supports user JWTs and API keys. |
 | `RASTRO_USER_TOKEN` | optional | User JWT alias for `RASTRO_AUTH_TOKEN`. |
 | `RASTRO_API_KEY` | optional | API key alias for `RASTRO_AUTH_TOKEN`. |
-| `RASTRO_BASE_URL` | `https://api.rastro.ai/api` | API base URL |
+| `RASTRO_BASE_URL` | `https://catalogapi.rastro.ai/api` | API base URL |
 | `RASTRO_ORGANIZATION_ID` | optional | Organization UUID override. Recommended when using a user token. |
 | `RASTRO_MCP_ENABLE_DIRECT_ITEM_UPDATE` | `false` | Enable direct item PUT |
 | `RASTRO_MCP_STAGE_BATCH_SIZE` | `2000` | Chunk size for staging large activities |

@@ -18,7 +18,7 @@ import json
 import os
 import sys
 import traceback
-from typing import Any, Dict
+from typing import Any, AsyncIterator, Dict
 
 from rastro_mcp.client.api_client import RastroClient
 from rastro_mcp.client.auth import RastroAuth, load_auth_from_env
@@ -832,12 +832,7 @@ async def run_stdio_server():
     client = RastroClient(auth)
 
     try:
-        reader = asyncio.StreamReader()
-        protocol = asyncio.StreamReaderProtocol(reader)
-        await asyncio.get_event_loop().connect_read_pipe(lambda: protocol, sys.stdin.buffer)
-
-        while True:
-            line = await reader.readline()
+        async for line in _iter_stdio_lines(sys.stdin):
             if not line:
                 break
 
@@ -859,6 +854,18 @@ async def run_stdio_server():
 
     finally:
         await client.close()
+
+
+async def _iter_stdio_lines(stdin: Any) -> AsyncIterator[bytes]:
+    """Yield stdio lines using a thread-based reader for cross-runtime stability."""
+    buffer = getattr(stdin, "buffer", stdin)
+    while True:
+        line = await asyncio.to_thread(buffer.readline)
+        if isinstance(line, str):
+            line = line.encode("utf-8")
+        if not line:
+            break
+        yield line
 
 
 def main():

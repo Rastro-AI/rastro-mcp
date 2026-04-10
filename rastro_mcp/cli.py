@@ -8,7 +8,6 @@ Subcommands:
 
 import http.server
 import json
-import os
 import secrets
 import sys
 import threading
@@ -96,7 +95,7 @@ def login(
             )
 
         def log_message(self, format, *args):
-            pass  # suppress request logs
+            pass
 
     server = http.server.HTTPServer((callback_host, callback_port), CallbackHandler)
     port = server.server_address[1]
@@ -110,7 +109,6 @@ def login(
         webbrowser.open(auth_url)
 
     server.timeout = timeout_seconds
-    # Wait for a single callback request
     stop_event = threading.Event()
 
     def serve():
@@ -144,7 +142,6 @@ def login(
 def main():
     """CLI entry point: route to login or start the MCP server."""
     if len(sys.argv) > 1 and sys.argv[1] == "login":
-        # Parse simple flags
         kwargs = {}
         args = sys.argv[2:]
         i = 0

@@ -6,8 +6,10 @@ Supports bearer authentication with either a user token or an API key.
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
+from dotenv import dotenv_values
 
 @dataclass(init=False)
 class RastroAuth:
@@ -42,13 +44,13 @@ class RastroAuth:
 
     @property
     def headers(self) -> dict:
-        h = {
+        headers = {
             "Authorization": f"Bearer {self.token}",
             "Content-Type": "application/json",
         }
         if self.organization_id:
-            h["X-Organization-Id"] = self.organization_id
-        return h
+            headers["X-Organization-Id"] = self.organization_id
+        return headers
 
 
 def load_auth_from_env() -> RastroAuth:
@@ -61,8 +63,37 @@ def load_auth_from_env() -> RastroAuth:
         RASTRO_ORGANIZATION_ID: Organization UUID override. Recommended for user tokens.
         RASTRO_BASE_URL: API base URL (default: https://catalogapi.rastro.ai/api)
     """
+    def _load_auth_from_dotenv() -> tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
+        """Best-effort project dotenv lookup for local dev."""
+        candidate_roots = []
+        repo_root = Path(__file__).resolve().parents[2]
+        for root in (Path.cwd(), repo_root):
+            if root not in candidate_roots:
+                candidate_roots.append(root)
+
+        for root in candidate_roots:
+            for filename in (".env.local", ".env"):
+                env_path = root / filename
+                if not env_path.is_file():
+                    continue
+
+                values = dotenv_values(env_path)
+                for name in ("RASTRO_AUTH_TOKEN", "RASTRO_USER_TOKEN", "RASTRO_API_KEY"):
+                    token = values.get(name)
+                    if token:
+                        return (
+                            str(token),
+                            values.get("RASTRO_ORGANIZATION_ID"),
+                            values.get("RASTRO_BASE_URL"),
+                            f"{env_path}:{name}",
+                        )
+
+        return None, None, None, None
+
     token = os.environ.get("RASTRO_AUTH_TOKEN")
     credential_source = "RASTRO_AUTH_TOKEN"
+    organization_id = os.environ.get("RASTRO_ORGANIZATION_ID")
+    base_url = os.environ.get("RASTRO_BASE_URL") or "https://catalogapi.rastro.ai/api"
 
     if not token:
         token = os.environ.get("RASTRO_USER_TOKEN")
@@ -71,6 +102,14 @@ def load_auth_from_env() -> RastroAuth:
     if not token:
         token = os.environ.get("RASTRO_API_KEY")
         credential_source = "RASTRO_API_KEY"
+
+    if not token:
+        token, dotenv_org_id, dotenv_base_url, dotenv_source = _load_auth_from_dotenv()
+        if token:
+            credential_source = dotenv_source or ".env"
+            organization_id = organization_id or dotenv_org_id
+            if dotenv_base_url:
+                base_url = dotenv_base_url
 
     if not token:
         from rastro_mcp.cli import load_token_from_file
@@ -85,7 +124,7 @@ def load_auth_from_env() -> RastroAuth:
 
     return RastroAuth(
         token=token,
-        organization_id=os.environ.get("RASTRO_ORGANIZATION_ID"),
-        base_url=os.environ.get("RASTRO_BASE_URL") or "https://catalogapi.rastro.ai/api",
+        organization_id=organization_id,
+        base_url=base_url,
         credential_source=credential_source,
     )

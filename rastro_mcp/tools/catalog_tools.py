@@ -19,11 +19,13 @@ Tools:
 - catalog_snapshot_restore
 - catalog_duplicate
 - catalog_activity_save_workflow
+- catalog_validate_content
 """
 
 import asyncio
 import json
 import os
+import re
 import webbrowser
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
@@ -32,6 +34,7 @@ from rastro_mcp.client.api_client import RastroClient
 from rastro_mcp.execution.bundle_validate import bundle_validate
 from rastro_mcp.execution.path_safety import UnsafePathError, resolve_workspace_path
 from rastro_mcp.models.contracts import (
+    CATALOG_VALIDATE_PRESETS,
     BundleValidateInput,
     CatalogActivityCreateTransformInput,
     CatalogActivityGetInput,
@@ -54,6 +57,10 @@ from rastro_mcp.models.contracts import (
     CatalogTaxonomyGetInput,
     CatalogUpdateMdInput,
     CatalogUpdateQualityPromptInput,
+    CatalogValidateContentFinding,
+    CatalogValidateContentInput,
+    CatalogValidateContentOutput,
+    CatalogValidateContentRule,
     CreateTransformOutput,
     ValidationRules,
 )
@@ -423,3 +430,168 @@ async def catalog_activity_create_transform(client: RastroClient, params: Catalo
         pass  # Non-critical
 
     return output
+
+
+# ─── Content validation (read-only) ────────────────────────────────────────
+
+
+def _resolve_value(data: Dict[str, Any], path: str) -> List[str]:
+    """Resolve a dotted JSON path inside item `data`, returning all string values.
+
+    Supports:
+      - "title" -> data["title"]
+      - "specs.finish" -> data["specs.finish"] (flat key with dot) OR nested
+        data["specs"]["finish"] if the flat form is missing. Both conventions
+        exist in rastro catalogs.
+      - "product_variants[].title" -> [v["title"] for v in data["product_variants"]]
+    """
+    # Array wildcard: "product_variants[].foo.bar"
+    if "[]" in path:
+        head, _, tail = path.partition("[]")
+        array_path = head.rstrip(".")
+        sub_path = tail.lstrip(".")
+        arr = _resolve_one(data, array_path)
+        if not isinstance(arr, list):
+            return []
+        out: List[str] = []
+        for el in arr:
+            if isinstance(el, dict):
+                out.extend(_resolve_value(el, sub_path) if sub_path else [str(el)])
+            elif isinstance(el, str):
+                out.append(el)
+        return out
+
+    val = _resolve_one(data, path)
+    if val is None:
+        return []
+    if isinstance(val, str):
+        return [val]
+    if isinstance(val, list):
+        return [str(x) for x in val if isinstance(x, (str, int, float))]
+    return [str(val)]
+
+
+def _resolve_one(data: Dict[str, Any], path: str) -> Any:
+    """Try the flat-dot key first (legacy Rastro convention), then nested."""
+    if path in data:
+        return data[path]
+    # Try nested only if no flat key exists
+    node: Any = data
+    for part in path.split("."):
+        if isinstance(node, dict) and part in node:
+            node = node[part]
+        else:
+            return None
+    return node
+
+
+async def catalog_validate_content(
+    client: RastroClient, params: CatalogValidateContentInput
+) -> CatalogValidateContentOutput:
+    """Run regex-based content validation against all items in a catalog.
+
+    Useful for: catching forbidden tokens (`Corona`, `CL-...`, raw finish codes,
+    `MR-16`, `lm`, lowercase `lumens`, `diecast`, `5in` as unit) before a push
+    and right after any rewrite activity. Returns findings per-rule with a
+    short match excerpt so agents can fix without re-fetching every row.
+
+    Either `rules` OR `use_preset` must be supplied.
+    """
+    rule_dicts: List[Dict[str, Any]] = []
+    if params.rules:
+        rule_dicts.extend([r.model_dump() if hasattr(r, "model_dump") else r for r in params.rules])
+    if params.use_preset:
+        preset = CATALOG_VALIDATE_PRESETS.get(params.use_preset)
+        if not preset:
+            raise ValueError(
+                f"Unknown preset '{params.use_preset}'. Available: "
+                f"{sorted(CATALOG_VALIDATE_PRESETS.keys())}"
+            )
+        rule_dicts.extend(preset)
+    if not rule_dicts:
+        raise ValueError("Supply `rules=[...]` or `use_preset=...`.")
+
+    # Compile all regexes upfront (fail fast on bad patterns)
+    compiled: List[Dict[str, Any]] = []
+    for r in rule_dicts:
+        flags = re.IGNORECASE if r.get("case_insensitive") else 0
+        try:
+            rx = re.compile(r["pattern"], flags)
+        except re.error as exc:
+            raise ValueError(f"Rule '{r['name']}' has invalid regex: {exc}") from exc
+        compiled.append({
+            "name": r["name"],
+            "rx": rx,
+            "fields": r.get("fields", []),
+            "mode": r.get("mode", "must_not_match"),
+        })
+
+    # Page through catalog items
+    counts_by_rule: Dict[str, int] = {rd["name"]: 0 for rd in compiled}
+    findings: List[CatalogValidateContentFinding] = []
+    findings_cap: Dict[str, int] = {rd["name"]: 0 for rd in compiled}
+    page_size = 500
+    offset = 0
+    scanned = 0
+    while True:
+        resp = await client.get_catalog_raw_items(
+            catalog_id=params.catalog_id,
+            limit=page_size,
+            offset=offset,
+            entity_type=params.entity_type,
+            organization_id=params.organization_id,
+        )
+        items = resp.get("items") if isinstance(resp, dict) else None
+        if items is None and isinstance(resp, list):
+            items = resp
+        items = items or []
+        if not items:
+            break
+
+        for item in items:
+            scanned += 1
+            data = item.get("data") or {}
+            item_id = item.get("id") or ""
+            pid = data.get("product_id") if isinstance(data, dict) else None
+
+            for rule in compiled:
+                for field in rule["fields"]:
+                    values = _resolve_value(data, field)
+                    for v in values:
+                        match = rule["rx"].search(v)
+                        if rule["mode"] == "must_not_match" and match:
+                            counts_by_rule[rule["name"]] += 1
+                            if findings_cap[rule["name"]] < params.limit:
+                                start = max(0, match.start() - 30)
+                                end = min(len(v), match.end() + 30)
+                                findings.append(CatalogValidateContentFinding(
+                                    rule=rule["name"],
+                                    field=field,
+                                    product_id=pid,
+                                    item_id=item_id,
+                                    match_excerpt=v[start:end],
+                                ))
+                                findings_cap[rule["name"]] += 1
+                        elif rule["mode"] == "must_match" and not match:
+                            counts_by_rule[rule["name"]] += 1
+                            if findings_cap[rule["name"]] < params.limit:
+                                findings.append(CatalogValidateContentFinding(
+                                    rule=rule["name"],
+                                    field=field,
+                                    product_id=pid,
+                                    item_id=item_id,
+                                    match_excerpt=(v[:60] + "…") if len(v) > 60 else v,
+                                ))
+                                findings_cap[rule["name"]] += 1
+
+        if len(items) < page_size:
+            break
+        offset += page_size
+
+    return CatalogValidateContentOutput(
+        catalog_id=params.catalog_id,
+        scanned=scanned,
+        total_violations=sum(counts_by_rule.values()),
+        counts_by_rule=counts_by_rule,
+        findings=findings,
+    )

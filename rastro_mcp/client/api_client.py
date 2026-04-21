@@ -462,10 +462,16 @@ class RastroClient:
         return await self._request("GET", f"/public/catalogs/{catalog_id}/snapshots", params=params, _org_id=organization_id)
 
     async def create_catalog_snapshot(self, catalog_id: str, reason: str, organization_id: Optional[str] = None) -> dict:
-        return await self._request("POST", f"/public/catalogs/{catalog_id}/snapshots", json={"reason": reason}, _org_id=organization_id)
+        # Retry-wrapped: snapshot creation touches multiple tables via RPC and
+        # intermittently 500s on transient Supabase/PG hiccups; retries let
+        # the MCP tool look deterministic to agents.
+        return await self._request_with_retry("POST", f"/public/catalogs/{catalog_id}/snapshots", json={"reason": reason}, _org_id=organization_id)
 
     async def restore_catalog_snapshot(self, catalog_id: str, snapshot_id: str, organization_id: Optional[str] = None) -> dict:
-        return await self._request("POST", f"/public/catalogs/{catalog_id}/snapshots/{snapshot_id}/restore", _org_id=organization_id)
+        # Long-running (creates safety snapshot + upserts batches). Use retry
+        # for transient errors; do NOT extend the timeout here — the caller
+        # controls timeout via RastroClient(timeout=...).
+        return await self._request_with_retry("POST", f"/public/catalogs/{catalog_id}/snapshots/{snapshot_id}/restore", _org_id=organization_id)
 
     async def duplicate_catalog(self, catalog_id: str, payload: dict, organization_id: Optional[str] = None) -> dict:
         return await self._request("POST", f"/public/catalogs/{catalog_id}/duplicate", json=payload, _org_id=organization_id)
@@ -529,10 +535,11 @@ class RastroClient:
         return await self._request("PUT", f"/public/catalogs/{catalog_id}/quality-prompt", json={"prompt": prompt})
 
     async def update_catalog_md(self, catalog_id: str, catalog_md: str) -> dict:
-        return await self._request("PUT", f"/public/catalogs/{catalog_id}/catalog-md", json={"catalog_md": catalog_md})
+        # Retry on transient 5xx so agents don't false-negative on the write.
+        return await self._request_with_retry("PUT", f"/public/catalogs/{catalog_id}/catalog-md", json={"catalog_md": catalog_md})
 
     async def get_catalog_md(self, catalog_id: str) -> dict:
-        return await self._request("GET", f"/public/catalogs/{catalog_id}/catalog-md")
+        return await self._request_with_retry("GET", f"/public/catalogs/{catalog_id}/catalog-md")
 
     async def get_enrich_job(self, job_id: str) -> dict:
         return await self._request("GET", f"/public/enrich/{job_id}")

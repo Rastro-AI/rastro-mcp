@@ -45,6 +45,7 @@ from rastro_mcp.models.contracts import (
     CatalogTaxonomyGetInput,
     CatalogUpdateMdInput,
     CatalogUpdateQualityPromptInput,
+    CatalogValidateContentInput,
     CatalogVisualizeLocalInput,
     DiffComputeInput,
     ServiceImageHostInput,
@@ -78,6 +79,7 @@ from rastro_mcp.tools.catalog_tools import (
     catalog_taxonomy_get,
     catalog_update_md,
     catalog_update_quality_prompt,
+    catalog_validate_content,
 )
 from rastro_mcp.tools.execution_tools import (
     execution_bundle_validate,
@@ -359,6 +361,45 @@ TOOL_DEFINITIONS = [
                 "snapshot_id": {"type": "string"},
             },
             "required": ["catalog_id", "snapshot_id"],
+        },
+    },
+    {
+        "name": "catalog_validate_content",
+        "description": (
+            "Run regex content checks across all items in a catalog. Pass "
+            "`rules=[{name, pattern, fields, mode?, case_insensitive?}]` for "
+            "custom checks, or `use_preset='sunco_corona'` for a ready-made "
+            "ruleset (no Corona, no CL-codes, no MR-dash, no 'in' as a unit "
+            "in titles, no lowercase 'lumens', no 'diecast', etc.). Returns "
+            "per-rule violation counts plus up to `limit` example rows with "
+            "product_id, field, and the matched excerpt. Safe: read-only, "
+            "no catalog writes."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "catalog_id": {"type": "string"},
+                "rules": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "pattern": {"type": "string"},
+                            "fields": {"type": "array", "items": {"type": "string"}},
+                            "mode": {"type": "string", "enum": ["must_not_match", "must_match"]},
+                            "case_insensitive": {"type": "boolean"},
+                            "description": {"type": "string"},
+                        },
+                        "required": ["name", "pattern", "fields"],
+                    },
+                },
+                "use_preset": {"type": "string", "description": "e.g. 'sunco_corona'"},
+                "entity_type": {"type": "string", "default": "product"},
+                "limit": {"type": "integer", "default": 20, "description": "Max example rows per rule"},
+                "organization_id": {"type": "string"},
+            },
+            "required": ["catalog_id"],
         },
     },
     {
@@ -664,6 +705,8 @@ async def dispatch_tool(client: RastroClient, tool_name: str, arguments: Dict[st
         return await catalog_snapshot_create(client, CatalogSnapshotCreateInput(**arguments))
     elif tool_name == "catalog_snapshot_restore":
         return await catalog_snapshot_restore(client, CatalogSnapshotRestoreInput(**arguments))
+    elif tool_name == "catalog_validate_content":
+        return await catalog_validate_content(client, CatalogValidateContentInput(**arguments))
     elif tool_name == "catalog_duplicate":
         return await catalog_duplicate(client, CatalogDuplicateInput(**arguments))
     elif tool_name == "catalog_activity_save_workflow":

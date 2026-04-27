@@ -326,7 +326,9 @@ async def catalog_activity_create_transform(client: RastroClient, params: Catalo
         activity_metadata["script"] = params.script.model_dump()
     if params.diff_summary:
         activity_metadata["diff_summary"] = params.diff_summary
-    if validation.computed:
+    if params.validation_report:
+        activity_metadata["validation_report"] = params.validation_report
+    elif validation.computed:
         activity_metadata["validation_report"] = {
             "valid": validation.valid,
             "errors": [e.model_dump() for e in validation.errors],
@@ -350,6 +352,8 @@ async def catalog_activity_create_transform(client: RastroClient, params: Catalo
         activity_context["attachments"] = params.attachments
     if params.session_context:
         activity_context["session_context"] = params.session_context
+    if params.base_snapshot_id:
+        activity_context.setdefault("base_snapshot_id", params.base_snapshot_id)
     if activity_context:
         input_data["activity_context"] = activity_context
 
@@ -357,6 +361,7 @@ async def catalog_activity_create_transform(client: RastroClient, params: Catalo
     create_payload: Dict[str, Any] = {
         "type": "custom_transform",
         "description": params.activity_message,
+        "input_data": input_data,
         "metadata": activity_metadata,
         "status": "created",
         "staged_changes": [],
@@ -485,9 +490,7 @@ def _resolve_one(data: Dict[str, Any], path: str) -> Any:
     return node
 
 
-async def catalog_validate_content(
-    client: RastroClient, params: CatalogValidateContentInput
-) -> CatalogValidateContentOutput:
+async def catalog_validate_content(client: RastroClient, params: CatalogValidateContentInput) -> CatalogValidateContentOutput:
     """Run regex-based content validation against all items in a catalog.
 
     Useful for: catching forbidden tokens (`Corona`, `CL-...`, raw finish codes,
@@ -503,10 +506,7 @@ async def catalog_validate_content(
     if params.use_preset:
         preset = CATALOG_VALIDATE_PRESETS.get(params.use_preset)
         if not preset:
-            raise ValueError(
-                f"Unknown preset '{params.use_preset}'. Available: "
-                f"{sorted(CATALOG_VALIDATE_PRESETS.keys())}"
-            )
+            raise ValueError(f"Unknown preset '{params.use_preset}'. Available: " f"{sorted(CATALOG_VALIDATE_PRESETS.keys())}")
         rule_dicts.extend(preset)
     if not rule_dicts:
         raise ValueError("Supply `rules=[...]` or `use_preset=...`.")
@@ -519,12 +519,14 @@ async def catalog_validate_content(
             rx = re.compile(r["pattern"], flags)
         except re.error as exc:
             raise ValueError(f"Rule '{r['name']}' has invalid regex: {exc}") from exc
-        compiled.append({
-            "name": r["name"],
-            "rx": rx,
-            "fields": r.get("fields", []),
-            "mode": r.get("mode", "must_not_match"),
-        })
+        compiled.append(
+            {
+                "name": r["name"],
+                "rx": rx,
+                "fields": r.get("fields", []),
+                "mode": r.get("mode", "must_not_match"),
+            }
+        )
 
     # Page through catalog items
     counts_by_rule: Dict[str, int] = {rd["name"]: 0 for rd in compiled}
@@ -564,24 +566,28 @@ async def catalog_validate_content(
                             if findings_cap[rule["name"]] < params.limit:
                                 start = max(0, match.start() - 30)
                                 end = min(len(v), match.end() + 30)
-                                findings.append(CatalogValidateContentFinding(
-                                    rule=rule["name"],
-                                    field=field,
-                                    product_id=pid,
-                                    item_id=item_id,
-                                    match_excerpt=v[start:end],
-                                ))
+                                findings.append(
+                                    CatalogValidateContentFinding(
+                                        rule=rule["name"],
+                                        field=field,
+                                        product_id=pid,
+                                        item_id=item_id,
+                                        match_excerpt=v[start:end],
+                                    )
+                                )
                                 findings_cap[rule["name"]] += 1
                         elif rule["mode"] == "must_match" and not match:
                             counts_by_rule[rule["name"]] += 1
                             if findings_cap[rule["name"]] < params.limit:
-                                findings.append(CatalogValidateContentFinding(
-                                    rule=rule["name"],
-                                    field=field,
-                                    product_id=pid,
-                                    item_id=item_id,
-                                    match_excerpt=(v[:60] + "…") if len(v) > 60 else v,
-                                ))
+                                findings.append(
+                                    CatalogValidateContentFinding(
+                                        rule=rule["name"],
+                                        field=field,
+                                        product_id=pid,
+                                        item_id=item_id,
+                                        match_excerpt=(v[:60] + "…") if len(v) > 60 else v,
+                                    )
+                                )
                                 findings_cap[rule["name"]] += 1
 
         if len(items) < page_size:

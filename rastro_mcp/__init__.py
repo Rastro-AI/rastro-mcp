@@ -7,4 +7,4 @@ Provides tools in three categories:
 - execution_*: Local snapshot, diff, and validation tools
 """
 
-__version__ = "0.3.10"
+__version__ = "0.3.11"

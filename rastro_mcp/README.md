@@ -320,12 +320,16 @@ Export catalog rows + schema to local files (parquet/csv) for Python transforms.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `catalog_id` | string | yes | Catalog UUID |
-| `output_dir` | string | no | Output directory (default: `./snapshots`) |
+| `output_dir` | string | no | Output directory (default: `./work/snapshots`) |
 | `format` | string | no | `parquet` or `csv` (default: parquet) |
 | `sample_size` | integer | no | Limit rows for sampling (null = all) |
 | `page_size` | integer | no | Rows per page (default: 400) |
 | `max_concurrency` | integer | no | Parallel fetch threads (default: 8) |
 | `prefer_raw` | boolean | no | Use `/raw-items` for full fidelity (default: true) |
+| `use_cache` | boolean | no | Reuse a local manifest-backed snapshot when available (default: true) |
+| `refresh` | boolean | no | Force a live pull and update the local snapshot cache (default: false) |
+
+Snapshot pulls also write `catalog_<id>_manifest.json` with deterministic row/schema hashes. Reusing the cache skips the API pull and returns `cache_hit=true`; pass `refresh=true` before final staging when you need a fresh source.
 
 #### `execution_local_diff_compute`
 Compute row/field diff between before/after local datasets. Outputs `staged_changes.jsonl`.
@@ -367,6 +371,8 @@ One-command staging: compute diff from before/after datasets, validate bundle (i
 | `taxonomy_changes` | object | no | Taxonomy changes to apply |
 | `attachments` | array | no | Attachment metadata |
 | `activity_context` | object | no | Additional audit context |
+| `base_snapshot_id` | string | no | Optional source snapshot ID for audit trail |
+| `validate_only` | boolean | no | Compute diff and validate without creating an activity |
 | `auto_open_review` | boolean | no | Open dashboard URL (default: true) |
 
 ### Prompts

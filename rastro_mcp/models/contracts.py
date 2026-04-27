@@ -27,15 +27,20 @@ class SnapshotPullInput(BaseModel):
     page_size: int = 400
     max_concurrency: int = 8
     prefer_raw: bool = True
+    use_cache: bool = True
+    refresh: bool = False
 
 
 class SnapshotPullOutput(BaseModel):
     catalog_id: str
     snapshot_path: str
     schema_path: str
+    manifest_path: Optional[str] = None
     rows: int
     columns: int
     base_snapshot_id: Optional[str] = None
+    source_hash: Optional[str] = None
+    cache_hit: bool = False
 
 
 class StageDatasetInput(BaseModel):
@@ -49,6 +54,8 @@ class StageDatasetInput(BaseModel):
     taxonomy_changes: Optional[Dict[str, Any]] = None
     attachments: Optional[List[Dict[str, Any]]] = None
     activity_context: Optional[Dict[str, Any]] = None
+    base_snapshot_id: Optional[str] = None
+    validate_only: bool = False
     auto_open_review: bool = True
 
 
@@ -82,12 +89,14 @@ class DiffComputeOutput(BaseModel):
 
 
 class StageDatasetOutput(BaseModel):
-    activity_id: str
+    activity_id: Optional[str] = None
     status: str
     staged_count: int
-    review_url: str
+    review_url: Optional[str] = None
     staged_changes_path: str
     diff_summary: DiffSummary
+    validation_report: Optional[Dict[str, Any]] = None
+    activity_context: Optional[Dict[str, Any]] = None
     sample_changes: List[SampleChange] = Field(default_factory=list)
 
 
@@ -365,39 +374,18 @@ class CatalogValidateContentRule(BaseModel):
 # Agents can always pass their own `rules=[...]` to override.
 CATALOG_VALIDATE_PRESETS: Dict[str, List[Dict[str, Any]]] = {
     "sunco_corona": [
-        {"name": "no_corona_brand", "pattern": r"\bCorona(\s+Lighting)?\b",
-         "fields": ["title", "description", "additional_specs", "global.title_tag", "global.description_tag"]},
-        {"name": "no_cl_sku_code", "pattern": r"\bCL-[A-Z0-9][A-Z0-9-]*\b",
-         "fields": ["title", "description"]},
-        {"name": "no_led_sku_code", "pattern": r"\bL-ED[A-Z0-9-]+\b",
-         "fields": ["title", "description"]},
-        {"name": "no_bare_lamp_fragments",
-         "pattern": r"\b(ED16|ED11|EDT3|EDBA|ED36|COB5W|BT3)\b",
-         "fields": ["title", "description"]},
-        {"name": "no_raw_finish_codes",
-         "pattern": r"\b(AB|BK|BZ|GM|SI|VG|SS|WH|RC|CU|BR|NB)\b",
-         "fields": ["title", "description"]},
-        {"name": "no_lm_abbreviation",
-         "pattern": r"\b\d+(\.\d+)?\s*lm\b", "case_insensitive": True,
-         "fields": ["title", "description", "additional_specs"]},
-        {"name": "no_lowercase_lumens",
-         "pattern": r"(?<![A-Za-z])lumens(?![A-Za-z])",
-         "fields": ["title", "description"]},
-        {"name": "no_hyphenated_mr",
-         "pattern": r"\bMR-(16|11|8)\b",
-         "fields": ["title", "description", "specs.bulb_base", "additional_specs"]},
-        {"name": "no_diecast",
-         "pattern": r"\b(diecast|die\s+cast)\b", "case_insensitive": True,
-         "fields": ["description", "specs.material", "additional_specs"]},
-        {"name": "no_down_light_two_words",
-         "pattern": r"\bdown\s+light\b", "case_insensitive": True,
-         "fields": ["title", "description"]},
-        {"name": "no_in_as_unit_title",
-         "pattern": r"\d+\s*in\b(?!ch)", "case_insensitive": True,
-         "fields": ["title", "global.title_tag"]},
-        {"name": "no_in_as_unit_specs",
-         "pattern": r"\d+\s*in\b(?!ch)", "case_insensitive": True,
-         "fields": ["specs.dimensions", "specs.components", "additional_specs"]},
+        {"name": "no_corona_brand", "pattern": r"\bCorona(\s+Lighting)?\b", "fields": ["title", "description", "additional_specs", "global.title_tag", "global.description_tag"]},
+        {"name": "no_cl_sku_code", "pattern": r"\bCL-[A-Z0-9][A-Z0-9-]*\b", "fields": ["title", "description"]},
+        {"name": "no_led_sku_code", "pattern": r"\bL-ED[A-Z0-9-]+\b", "fields": ["title", "description"]},
+        {"name": "no_bare_lamp_fragments", "pattern": r"\b(ED16|ED11|EDT3|EDBA|ED36|COB5W|BT3)\b", "fields": ["title", "description"]},
+        {"name": "no_raw_finish_codes", "pattern": r"\b(AB|BK|BZ|GM|SI|VG|SS|WH|RC|CU|BR|NB)\b", "fields": ["title", "description"]},
+        {"name": "no_lm_abbreviation", "pattern": r"\b\d+(\.\d+)?\s*lm\b", "case_insensitive": True, "fields": ["title", "description", "additional_specs"]},
+        {"name": "no_lowercase_lumens", "pattern": r"(?<![A-Za-z])lumens(?![A-Za-z])", "fields": ["title", "description"]},
+        {"name": "no_hyphenated_mr", "pattern": r"\bMR-(16|11|8)\b", "fields": ["title", "description", "specs.bulb_base", "additional_specs"]},
+        {"name": "no_diecast", "pattern": r"\b(diecast|die\s+cast)\b", "case_insensitive": True, "fields": ["description", "specs.material", "additional_specs"]},
+        {"name": "no_down_light_two_words", "pattern": r"\bdown\s+light\b", "case_insensitive": True, "fields": ["title", "description"]},
+        {"name": "no_in_as_unit_title", "pattern": r"\d+\s*in\b(?!ch)", "case_insensitive": True, "fields": ["title", "global.title_tag"]},
+        {"name": "no_in_as_unit_specs", "pattern": r"\d+\s*in\b(?!ch)", "case_insensitive": True, "fields": ["specs.dimensions", "specs.components", "additional_specs"]},
     ],
 }
 

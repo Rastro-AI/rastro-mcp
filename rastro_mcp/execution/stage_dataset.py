@@ -8,8 +8,9 @@ One-command staging pipeline:
 """
 
 import hashlib
+import json
 import os
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from rastro_mcp.client.api_client import RastroClient
 from rastro_mcp.execution.bundle_validate import bundle_validate
@@ -37,6 +38,45 @@ def _load_script_info(script_path: str) -> ScriptInfo:
         content=content,
         sha256=sha256,
     )
+
+
+def _load_source_snapshot_context(before_path: str, base_snapshot_id: Optional[str] = None) -> Dict[str, Any]:
+    """Load audit metadata written by execution_catalog_snapshot_pull, when present."""
+    normalized = resolve_workspace_path(before_path, must_exist=True, expect_file=True, label="before_path")
+    stem, _ = os.path.splitext(normalized)
+    manifest_path = f"{stem}_manifest.json"
+    if not os.path.exists(manifest_path):
+        context: Dict[str, Any] = {"snapshot_path": normalized}
+        if base_snapshot_id:
+            context["base_snapshot_id"] = base_snapshot_id
+        return context
+
+    try:
+        with open(manifest_path) as f:
+            manifest = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        context = {"snapshot_path": normalized, "manifest_path": manifest_path, "manifest_readable": False}
+        if base_snapshot_id:
+            context["base_snapshot_id"] = base_snapshot_id
+        return context
+
+    context = {
+        "catalog_id": manifest.get("catalog_id"),
+        "snapshot_path": normalized,
+        "schema_path": manifest.get("schema_path"),
+        "manifest_path": manifest_path,
+        "source_hash": manifest.get("source_hash"),
+        "rows_hash": manifest.get("rows_hash"),
+        "schema_hash": manifest.get("schema_hash"),
+        "rows": manifest.get("rows"),
+        "columns": manifest.get("columns"),
+        "created_at": manifest.get("created_at"),
+        "cache_key": manifest.get("cache_key"),
+    }
+    manifest_snapshot_id = manifest.get("base_snapshot_id")
+    if base_snapshot_id or manifest_snapshot_id:
+        context["base_snapshot_id"] = base_snapshot_id or manifest_snapshot_id
+    return {k: v for k, v in context.items() if v is not None}
 
 
 async def stage_dataset(client: RastroClient, params: StageDatasetInput) -> StageDatasetOutput:
@@ -68,6 +108,28 @@ async def stage_dataset(client: RastroClient, params: StageDatasetInput) -> Stag
         error_msgs = "; ".join(e.message for e in validation.errors)
         raise ValueError(f"Bundle validation failed: {error_msgs}")
 
+    activity_context: Dict[str, Any] = {}
+    if params.activity_context:
+        activity_context.update(params.activity_context)
+    activity_context.setdefault("source_snapshot", _load_source_snapshot_context(params.before_path, params.base_snapshot_id))
+    if params.base_snapshot_id:
+        activity_context["base_snapshot_id"] = params.base_snapshot_id
+
+    validation_report = validation.model_dump()
+    staged_count = int((validation.computed.get("staged_summary") or {}).get("total", 0))
+    if params.validate_only:
+        return StageDatasetOutput(
+            activity_id=None,
+            status="validated",
+            staged_count=staged_count,
+            review_url=None,
+            staged_changes_path=diff_result.staged_changes_path,
+            diff_summary=diff_result.diff_summary,
+            validation_report=validation_report,
+            activity_context=activity_context,
+            sample_changes=diff_result.sample_changes,
+        )
+
     script_info: Optional[ScriptInfo] = None
     if params.script_path:
         script_info = _load_script_info(params.script_path)
@@ -84,7 +146,8 @@ async def stage_dataset(client: RastroClient, params: StageDatasetInput) -> Stag
             schema_changes=params.schema_changes,
             taxonomy_changes=params.taxonomy_changes,
             attachments=params.attachments,
-            activity_context=params.activity_context,
+            activity_context=activity_context,
+            base_snapshot_id=params.base_snapshot_id,
             auto_open_review=params.auto_open_review,
         ),
     )
@@ -96,5 +159,7 @@ async def stage_dataset(client: RastroClient, params: StageDatasetInput) -> Stag
         review_url=staged.review_url,
         staged_changes_path=diff_result.staged_changes_path,
         diff_summary=diff_result.diff_summary,
+        validation_report=validation_report,
+        activity_context=activity_context,
         sample_changes=diff_result.sample_changes,
     )

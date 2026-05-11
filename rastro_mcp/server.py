@@ -14,13 +14,15 @@ Or via MCP stdio transport for integration with Claude/Codex.
 """
 
 import asyncio
+import contextlib
 import json
 import os
+import signal
 import sys
 import traceback
 from typing import Any, AsyncIterator, Dict
 
-from rastro_mcp.client.api_client import RastroClient
+from rastro_mcp.client.api_client import RastroAPIError, RastroClient
 from rastro_mcp.client.auth import RastroAuth, load_auth_from_env
 from rastro_mcp.models.contracts import (
     BundleValidateInput,
@@ -776,6 +778,31 @@ def _load_master_prompt() -> str:
 MASTER_PROMPT = _load_master_prompt()
 
 
+def _truncate_for_agent(value: Any, max_chars: int = 1200) -> str:
+    text = str(value or "")
+    if len(text) <= max_chars:
+        return text
+    return f"{text[:max_chars]}... [truncated]"
+
+
+def _tool_error_payload(tool_name: str, exc: Exception) -> Dict[str, Any]:
+    """Return agent-visible diagnostics without forcing users into server logs."""
+    payload: Dict[str, Any] = {
+        "error": "tool_execution_failed",
+        "tool": tool_name,
+        "type": type(exc).__name__,
+        "message": _truncate_for_agent(exc),
+    }
+    if isinstance(exc, RastroAPIError):
+        payload["status_code"] = exc.status_code
+        payload["backend_message"] = _truncate_for_agent(exc.detail)
+        if isinstance(exc.response_body, dict):
+            detail = exc.response_body.get("detail") or exc.response_body.get("error")
+            if detail is not None:
+                payload["backend_detail"] = _truncate_for_agent(detail)
+    return payload
+
+
 async def handle_jsonrpc_message(client: RastroClient, message: dict) -> dict:
     """Handle a single JSON-RPC message."""
     method = message.get("method", "")
@@ -826,11 +853,12 @@ async def handle_jsonrpc_message(client: RastroClient, message: dict) -> dict:
         except Exception as e:
             print(f"[rastro-mcp] Tool call failed ({tool_name}): {type(e).__name__}: {e}", file=sys.stderr)
             traceback.print_exc(file=sys.stderr)
+            error_payload = _tool_error_payload(tool_name, e)
             return {
                 "jsonrpc": "2.0",
                 "id": msg_id,
                 "result": {
-                    "content": [{"type": "text", "text": "Tool execution failed. Check MCP server logs for details."}],
+                    "content": [{"type": "text", "text": json.dumps(error_payload, default=str, indent=2)}],
                     "isError": True,
                 },
             }
@@ -877,9 +905,30 @@ async def run_stdio_server():
     """Run the MCP server over stdin/stdout using JSON-RPC."""
     auth = load_auth_from_env()
     client = RastroClient(auth)
+    shutdown_event = asyncio.Event()
+    current_task = asyncio.current_task()
+    loop = asyncio.get_running_loop()
+    registered_signals: list[signal.Signals] = []
+    watchdog_task = asyncio.create_task(_parent_watchdog(shutdown_event))
+
+    def _request_shutdown() -> None:
+        shutdown_event.set()
+        if current_task is not None:
+            current_task.cancel()
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            loop.add_signal_handler(sig, _request_shutdown)
+            registered_signals.append(sig)
+        except (NotImplementedError, RuntimeError):
+            # Some runtimes do not support asyncio signal handlers. In those
+            # environments EOF/cancellation still reaches the finally block.
+            pass
 
     try:
         async for line in _iter_stdio_lines(sys.stdin):
+            if shutdown_event.is_set():
+                break
             if not line:
                 break
 
@@ -899,8 +948,41 @@ async def run_stdio_server():
                 sys.stdout.write(response_str)
                 sys.stdout.flush()
 
+    except asyncio.CancelledError:
+        shutdown_event.set()
     finally:
+        shutdown_event.set()
+        watchdog_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await watchdog_task
+        for sig in registered_signals:
+            loop.remove_signal_handler(sig)
         await client.close()
+
+
+def _parent_is_gone(initial_ppid: int, current_ppid: int) -> bool:
+    return current_ppid == 1 or current_ppid != initial_ppid
+
+
+async def _parent_watchdog(
+    shutdown_event: asyncio.Event,
+    interval: float | None = None,
+    *,
+    getppid=os.getppid,
+    exit_func=os._exit,
+) -> None:
+    """Hard-exit if the MCP host dies and stdio never reaches EOF."""
+    initial_ppid = getppid()
+    if interval is None:
+        interval = float(os.environ.get("RASTRO_MCP_PARENT_WATCHDOG_INTERVAL_SECONDS", "5"))
+
+    while not shutdown_event.is_set():
+        await asyncio.sleep(interval)
+        current_ppid = getppid()
+        if _parent_is_gone(initial_ppid, current_ppid):
+            print(f"[rastro-mcp] parent died (ppid {initial_ppid} -> {current_ppid}); exiting", file=sys.stderr)
+            exit_func(0)
+            return
 
 
 async def _iter_stdio_lines(stdin: Any) -> AsyncIterator[bytes]:

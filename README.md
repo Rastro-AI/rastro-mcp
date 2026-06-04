@@ -260,7 +260,6 @@ The MCP package exposes catalog-aware helpers, but agents may still call `/api/p
 
 - **Taxonomy classification only:** send `taxonomy`, `predict_taxonomy: true`, `predict_taxonomy_attributes: false`, and omit `output_schema` unless you also want normal fields extracted. Do not invent dummy fields such as `empty`.
 - **Taxonomy with attributes:** keep `predict_taxonomy_attributes` omitted or `true`; results include `taxonomy_attributes` after classification.
-- **Per-row normal schemas:** send top-level `output_schemas` and put `schema_id` on each item. `output_schema` is only the fallback for rows without `schema_id`.
 - **Requested attributes:** send top-level `attribute_sets` and put `attribute_set_id` on each item. The output schema must request `attribute_results_json`; inline per-row `requested_attributes` / `source_hints` are rejected by public preflight.
 
 #### `service_map_to_catalog_schema`

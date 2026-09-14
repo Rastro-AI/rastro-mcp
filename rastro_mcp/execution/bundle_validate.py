@@ -21,6 +21,18 @@ SUPPORTED_STAGED_EXTS = {".jsonl", ".json", ".parquet"}
 SYSTEM_COLUMNS = {"__catalog_item_id", "__entity_type", "__parent_id", "__current_version"}
 
 
+class DeferredSchemaValidationClient:
+    """Keep file checks while a preceding plan operation changes catalog rules."""
+
+    schema_validation_deferred = True
+
+    def __init__(self, client: Any):
+        self.client = client
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.client, name)
+
+
 def _compute_file_sha256(path: str) -> str:
     """Compute SHA-256 hash of a file."""
     h = hashlib.sha256()
@@ -285,7 +297,15 @@ async def bundle_validate(client: RastroClient, params: BundleValidateInput) -> 
 
     # ── Schema alignment checks ──────────────────────────────────────
     required_fields: List[str] = []
-    if params.catalog_id:
+    schema_validation_deferred = bool(params.schema_changes or params.taxonomy_changes or getattr(client, "schema_validation_deferred", False))
+    if schema_validation_deferred:
+        warnings.append(
+            ValidationIssue(
+                code="CATALOG_VALIDATION_DEFERRED",
+                message="This operation or an earlier plan operation changes catalog rules. Schema and required-field checks are deferred until apply uses the resulting schema.",
+            )
+        )
+    if params.catalog_id and not schema_validation_deferred:
         try:
             schema = await client.get_catalog_schema(params.catalog_id)
             schema_fields = set(schema.get("schema_definition", {}).get("properties", {}).keys())

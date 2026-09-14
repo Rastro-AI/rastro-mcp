@@ -26,8 +26,9 @@ class DeferredSchemaValidationClient:
 
     schema_validation_deferred = True
 
-    def __init__(self, client: Any):
+    def __init__(self, client: Any, declared_schema_additions: Optional[Set[str]] = None):
         self.client = client
+        self.declared_schema_additions = set(declared_schema_additions or ())
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self.client, name)
@@ -86,27 +87,21 @@ def _is_delete_staged_change(change: Dict[str, Any]) -> bool:
 
 
 def _extract_declared_schema_additions(schema_changes: Optional[Dict[str, Any]]) -> Set[str]:
-    if not schema_changes:
+    if not isinstance(schema_changes, dict):
         return set()
 
-    # New contract: {mode: "batch_fields_v1", payload: {fields_to_add: [...]}}
-    if schema_changes.get("mode") == "batch_fields_v1":
-        payload = schema_changes.get("payload") or {}
-        fields_to_add = payload.get("fields_to_add") or []
-        names = set()
-        for field in fields_to_add:
-            if isinstance(field, dict):
-                name = field.get("field_name")
-                if name:
-                    names.add(name)
-        return names
+    # Accept activity payloads and normalized plan schema operations alike.
+    payload = (schema_changes.get("payload") or {}) if schema_changes.get("mode") == "batch_fields_v1" else schema_changes
+    if not isinstance(payload, dict):
+        return set()
+    fields_to_add = payload.get("fields_to_add") or []
+    names = {field["field_name"] for field in fields_to_add if isinstance(field, dict) and isinstance(field.get("field_name"), str) and field["field_name"]} if isinstance(fields_to_add, list) else set()
 
     # Backward compatibility with older MCP prototype
-    add_fields = schema_changes.get("add_fields")
+    add_fields = payload.get("add_fields")
     if isinstance(add_fields, dict):
-        return set(add_fields.keys())
-
-    return set()
+        names.update(add_fields.keys())
+    return names
 
 
 def _validate_file_path(
@@ -302,15 +297,16 @@ async def bundle_validate(client: RastroClient, params: BundleValidateInput) -> 
         warnings.append(
             ValidationIssue(
                 code="CATALOG_VALIDATION_DEFERRED",
-                message="This operation or an earlier plan operation changes catalog rules. Schema and required-field checks are deferred until apply uses the resulting schema.",
+                message="This operation or an earlier plan operation changes catalog rules. Required-field checks are deferred until apply uses the resulting schema; column alignment is still checked now.",
             )
         )
-    if params.catalog_id and not schema_validation_deferred:
+    if params.catalog_id:
         try:
             schema = await client.get_catalog_schema(params.catalog_id)
             schema_fields = set(schema.get("schema_definition", {}).get("properties", {}).keys())
-            required_fields = list(schema.get("schema_definition", {}).get("required", []))
-            declared_new = _extract_declared_schema_additions(params.schema_changes)
+            if not schema_validation_deferred:
+                required_fields = list(schema.get("schema_definition", {}).get("required", []))
+            declared_new = _extract_declared_schema_additions(params.schema_changes) | set(getattr(client, "declared_schema_additions", ()) or ())
 
             if after_df is not None:
                 after_cols = set(after_df.columns) - SYSTEM_COLUMNS

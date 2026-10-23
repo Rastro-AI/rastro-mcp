@@ -14,6 +14,7 @@ import pandas as pd
 
 from rastro_mcp.client.api_client import RastroClient
 from rastro_mcp.execution.path_safety import UnsafePathError, resolve_workspace_path
+from rastro_mcp.models.catalog_schema import field_applies_to_entity
 from rastro_mcp.models.contracts import BundleValidateInput, BundleValidateOutput, ValidationIssue
 
 SUPPORTED_DATASET_EXTS = {".parquet", ".csv"}
@@ -292,6 +293,7 @@ async def bundle_validate(client: RastroClient, params: BundleValidateInput) -> 
 
     # ── Schema alignment checks ──────────────────────────────────────
     required_fields: List[str] = []
+    schema_properties: Dict[str, Any] = {}
     schema_validation_deferred = bool(params.schema_changes or params.taxonomy_changes or getattr(client, "schema_validation_deferred", False))
     if schema_validation_deferred:
         warnings.append(
@@ -303,7 +305,8 @@ async def bundle_validate(client: RastroClient, params: BundleValidateInput) -> 
     if params.catalog_id:
         try:
             schema = await client.get_catalog_schema(params.catalog_id)
-            schema_fields = set(schema.get("schema_definition", {}).get("properties", {}).keys())
+            schema_properties = schema.get("schema_definition", {}).get("properties", {})
+            schema_fields = set(schema_properties)
             if not schema_validation_deferred:
                 required_fields = list(schema.get("schema_definition", {}).get("required", []))
             declared_new = _extract_declared_schema_additions(params.schema_changes) | set(getattr(client, "declared_schema_additions", ()) or ())
@@ -338,6 +341,8 @@ async def bundle_validate(client: RastroClient, params: BundleValidateInput) -> 
 
             missing = []
             for field in required_fields:
+                if not field_applies_to_entity(schema_properties.get(field, {}), change.get("catalog_item_entity_type")):
+                    continue
                 val = after_data.get(field)
                 if val is None:
                     missing.append(field)

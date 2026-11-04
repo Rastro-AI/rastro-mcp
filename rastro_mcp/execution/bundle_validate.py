@@ -294,7 +294,7 @@ async def bundle_validate(client: RastroClient, params: BundleValidateInput) -> 
     # ── Schema alignment checks ──────────────────────────────────────
     required_fields: List[str] = []
     schema_properties: Dict[str, Any] = {}
-    schema_validation_deferred = bool(params.schema_changes or params.taxonomy_changes or getattr(client, "schema_validation_deferred", False))
+    schema_validation_deferred = bool(params.schema_changes or params.taxonomy_changes or params.configuration_changes or getattr(client, "schema_validation_deferred", False))
     if schema_validation_deferred:
         warnings.append(
             ValidationIssue(

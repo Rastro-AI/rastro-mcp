@@ -309,6 +309,7 @@ async def catalog_activity_create_transform(client: RastroClient, params: Catalo
         staged_changes_path=params.staged_changes_file_path,
         diff_summary=params.diff_summary,
         schema_changes=params.schema_changes,
+        configuration_changes=params.configuration_changes,
         taxonomy_changes=params.taxonomy_changes,
         rules=ValidationRules(),
     )
@@ -338,8 +339,10 @@ async def catalog_activity_create_transform(client: RastroClient, params: Catalo
     if params.base_snapshot_id:
         activity_metadata["base_snapshot_id"] = params.base_snapshot_id
 
-    # Store schema/taxonomy changes in input for apply-time hooks.
+    # Store approved structural changes for apply-time hooks.
     input_data: Dict[str, Any] = {"description": params.activity_message}
+    if params.configuration_changes:
+        input_data["configuration_changes"] = params.configuration_changes
     if params.schema_changes:
         input_data["schema_changes"] = params.schema_changes
     if params.taxonomy_changes:

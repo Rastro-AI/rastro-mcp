@@ -51,6 +51,7 @@ class StageDatasetInput(BaseModel):
     key_field: str = "__catalog_item_id"
     script_path: Optional[str] = None
     schema_changes: Optional[Dict[str, Any]] = None
+    configuration_changes: Optional[Dict[str, Any]] = None
     taxonomy_changes: Optional[Dict[str, Any]] = None
     attachments: Optional[List[Dict[str, Any]]] = None
     activity_context: Optional[Dict[str, Any]] = None
@@ -123,6 +124,7 @@ class BundleValidateInput(BaseModel):
     staged_changes_path: Optional[str] = None
     diff_summary: Optional[Dict[str, Any]] = None
     schema_changes: Optional[Dict[str, Any]] = None
+    configuration_changes: Optional[Dict[str, Any]] = None
     taxonomy_changes: Optional[Dict[str, Any]] = None
     rules: ValidationRules = Field(default_factory=ValidationRules)
 
@@ -278,6 +280,7 @@ class CatalogActivityCreateTransformInput(BaseModel):
     staged_changes_inline: Optional[List[Dict[str, Any]]] = None
     staged_changes_file_path: Optional[str] = None
     schema_changes: Optional[Dict[str, Any]] = None
+    configuration_changes: Optional[Dict[str, Any]] = None
     taxonomy_changes: Optional[Dict[str, Any]] = None
     attachments: Optional[List[Dict[str, Any]]] = None
     activity_context: Optional[Dict[str, Any]] = None

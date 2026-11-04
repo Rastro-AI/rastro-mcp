@@ -457,6 +457,7 @@ TOOL_DEFINITIONS = [
                 "staged_changes_inline": {"type": "array", "description": "Inline staged changes array"},
                 "staged_changes_file_path": {"type": "string", "description": "Path to staged changes JSONL/JSON/parquet file"},
                 "schema_changes": {"type": "object", "description": "Schema changes to apply (Phase 1b)"},
+                "configuration_changes": {"type": "object", "description": "Approved field_mappings/variant_mode changes applied with the staged rows"},
                 "taxonomy_changes": {"type": "object", "description": "Taxonomy changes to apply (Phase 1b)"},
                 "attachments": {"type": "array", "description": "Attachment metadata. Stored under activity_context.attachments."},
                 "activity_context": {"type": "object", "description": "Additional audit context persisted on activity.input.activity_context."},
@@ -604,6 +605,7 @@ TOOL_DEFINITIONS = [
                 "key_field": {"type": "string", "default": "__catalog_item_id", "description": "Column used to match rows. Null-key rows are treated as new inserts."},
                 "script_path": {"type": "string", "description": "Optional Python script path for audit provenance"},
                 "schema_changes": {"type": "object"},
+                "configuration_changes": {"type": "object", "description": "Approved field_mappings/variant_mode changes applied with the staged rows"},
                 "taxonomy_changes": {"type": "object"},
                 "attachments": {"type": "array"},
                 "activity_context": {"type": "object"},
@@ -644,6 +646,7 @@ TOOL_DEFINITIONS = [
                 "staged_changes_path": {"type": "string"},
                 "diff_summary": {"type": "object"},
                 "schema_changes": {"type": "object"},
+                "configuration_changes": {"type": "object", "description": "Approved field_mappings/variant_mode changes applied with the staged rows"},
                 "taxonomy_changes": {"type": "object"},
                 "rules": {
                     "type": "object",
